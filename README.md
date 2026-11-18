@@ -2,7 +2,7 @@
 
 A fast, top-down simulation of a ship breaking sea ice, in two versions:
 
-- **A browser simulator** ([live page](https://pierrelux.github.io/icebreaker-lab/)): a 76 m icebreaker in a continuous ice sheet, large floes or broken pack, with a live trace of the ice force on the hull. Click the ice to set a course, or steer with A/D and W/S.
+- **A browser simulator** ([live page](https://pierrelucbacon.com/icebreaker-lab/)): a 76 m icebreaker in a continuous ice sheet, large floes or broken pack, with a live trace of the ice force on the hull. Click the ice to set a course, or steer with A/D and W/S.
 - **A JAX environment** (`icebreaker_jax.py`): the continuous-sheet physics with fixed array shapes, so `reset` and `step` jit-compile and vmap over thousands of environments.
 
 ## How the ice breaks
