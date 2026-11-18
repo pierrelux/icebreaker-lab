@@ -74,10 +74,10 @@ class Config:
     E: float = 5.4e9
     nu: float = 0.33
     rhoW: float = 1025.0
-    rhoI: float = 900.0
+    rhoI: float = 880.0
     g: float = 9.81
     Cf: float = 3.1
-    Cl: float = 0.32
+    Cl: float = 0.30
     Cv: float = -0.14
     cover_gain: float = 0.93      # fitted: bottom coverage of the rigid-piece model in steady icebreaking
     # fixed shapes

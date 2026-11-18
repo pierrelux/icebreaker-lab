@@ -21,9 +21,9 @@ a cusp of radius $R = C_l\, \ell\, (1 + C_v v_n)$ breaks off. Here $h$ is the ic
 | Separate floes, floe splitting | yes | no |
 | Broken pieces | rigid polygons | a grid of broken ice; its share under the hull scales the submersion resistance |
 
-**Against Lindqvist's formula** (an empirical fit to Baltic icebreaker trials), the browser version's ice resistance in a continuous sheet is 14 to 29% lower at 0.3 to 1.2 m of ice (`node checks/resistance_vs_lindqvist.js`).
+**Against Lindqvist's formula** (an empirical fit to Baltic icebreaker trials), the browser version's ice resistance in a continuous sheet is 6 to 12% lower at 0.6 to 1.2 m of ice and 34% lower at 0.3 m (`node checks/resistance_vs_lindqvist.js`).
 
-**JAX against the browser version**, uniform ice, 8 runs per thickness (`checks/compare_js.js`, `checks/compare_jax.py`): speed agrees within 2% and resistance within 3% at 0.6 to 1.2 m; at 0.3 m the JAX resistance is 9% higher.
+**JAX against the browser version**, uniform ice, 8 runs per thickness (`checks/compare_js.js`, `checks/compare_jax.py`): speed agrees within 2% and resistance within 1% at 0.6 to 1.2 m; at 0.3 m the JAX resistance is 22% higher.
 
 **JAX throughput** on one Quadro RTX 8000 (`bench_icebreaker_jax.py`, `bench_icebreaker_mila.sh`), in environment steps per second, one step being 0.2 s of simulated time:
 
@@ -34,11 +34,15 @@ a cusp of radius $R = C_l\, \ell\, (1 + C_v v_n)$ breaks off. Here $h$ is the ic
 | 1024 | 14,256 | 27,912 |
 | 4096 | 9,708 | 19,217 |
 
-At 180 Hz (`Config(dt=1/180, inner=3)`), speed stays within 1.5% and resistance within 6% of the 360 Hz results.
+At 180 Hz (`Config(dt=1/180, inner=3)`), speed stays within 1.5% and resistance within 6% of the 360 Hz results. These throughput figures were measured before $C_l$ and the ice density were corrected to Su et al.'s values (below).
+
+## Constants
+
+The ice properties are those of Su et al. (2010), Table 1: density 880 kg/m³, Young's modulus 5.4 GPa, Poisson ratio 0.33, crushing strength 2.3 MPa, flexural strength 0.55 MPa, ice–hull friction 0.15. The paper chooses $C_f = 3.1$ by matching Lindqvist's resistance (Figs. 9 and 10). It gives no number for $C_l$ or $C_v$, only their signs; $C_l = 0.30$ is the value paired with $C_f = 3.1$ in Su's PhD thesis (NTNU 2011, Fig. 2.22), fitted to the Tor Viking II h–v curve. $C_v = -0.14$ is attributed to Wang (2001) by secondary sources; we have not checked it against Wang's thesis.
 
 ## Caveats
 
-- The empirical constants $C_f = 3.1$, $C_l = 0.32$ and $C_v = -0.14$ are recalled from Su et al. and not yet checked against the paper. The splitting coefficient is an estimate.
+- $C_v$ is unverified (see above). The splitting coefficient is an estimate.
 - Nothing has been compared with full-scale or model-basin measurements.
 - The model is planar: no pitch or heave, and ice pushed under the hull is a resistance term, not simulated in depth.
 

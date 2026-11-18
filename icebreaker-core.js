@@ -43,9 +43,9 @@ const IceSim = (() => {
     sigF: 0.55e6,      // flexural strength, Pa
     sigC: 2.3e6,       // effective crushing pressure, Pa
     mu: 0.15,          // ice-hull friction
-    E: 5.4e9, nu: 0.33, rhoW: 1025, rhoI: 900, g: 9.81,
+    E: 5.4e9, nu: 0.33, rhoW: 1025, rhoI: 880, g: 9.81,
     KIc: 150e3,        // fracture toughness, Pa sqrt(m)
-    Cf: 3.1, Cl: 0.32, Cv: -0.14, Csplit: 1.2,
+    Cf: 3.1, Cl: 0.30, Cv: -0.14, Csplit: 1.2,
     minSheetArea: 60, maxPieces: 9000,
     ship: {
       L: 76, B: 18, T: 6.5, Cb: 0.55, bowFrac: 0.36, sternFrac: 0.2, bowPow: 2, sternTaper: 0.45,
