@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Real-time simulator of a ship breaking sea ice: bending cusps, floe splitting and a live ice-force trace.">
+<title>Icebreaker Lab</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500&family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+  /* Layout: the sea fills the screen; instruments float over it like a bridge console. */
+  :root {
+    --sea: #113a4a;
+    --panel: rgba(243, 248, 250, 0.9);
+    --ink: #0f2530;
+    --muted: #4a626e;
+    --line: rgba(15, 37, 48, 0.17);
+    --track: rgba(15, 37, 48, 0.16);
+    --accent: #bd3620;
+    --on-accent: #ffffff;
+    --ref: #1b6f8c;
+    --font-ui: "Barlow", "Helvetica Neue", Arial, sans-serif;
+    --font-label: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --sea: #0a2834; --panel: rgba(8, 25, 33, 0.86); --ink: #e3eef2; --muted: #9ab2bc; --line: rgba(227, 238, 242, 0.19);
+      --track: rgba(227, 238, 242, 0.2); --accent: #ee6c4d; --on-accent: #1b0a05; --ref: #6fc6dc; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --sea: #0a2834; --panel: rgba(8, 25, 33, 0.86); --ink: #e3eef2; --muted: #9ab2bc; --line: rgba(227, 238, 242, 0.19);
+    --track: rgba(227, 238, 242, 0.2); --accent: #ee6c4d; --on-accent: #1b0a05; --ref: #6fc6dc; color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body { background: var(--sea); color: var(--ink); font-family: var(--font-ui); font-size: 14px; line-height: 1.35; overflow: hidden; }
+  #app { position: relative; height: 100%; overflow: hidden; }
+  #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .panel { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px); }
+  h1, h2, dt, label, .seg button, summary { font-family: var(--font-label); }
+  h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: 0.01em; }
+  h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+
+  #console { top: 16px; left: max(16px, env(safe-area-inset-left, 0px)); width: min(318px, calc(100% - 32px)); padding: 12px 14px 12px; display: flex; flex-direction: column; gap: 10px; }
+  #console header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .seg button { flex: 1; min-width: 0; padding: 6px 4px; border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--ink); font-size: 13.5px; font-weight: 500; cursor: pointer; }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+  .read { margin: 0; display: grid; grid-template-columns: 1fr; gap: 5px; }
+  .read div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  dt { font-size: 13px; font-weight: 500; color: var(--muted); }
+  dd { margin: 0; font-family: var(--font-data); font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+  #controls { top: 16px; right: max(16px, env(safe-area-inset-right, 0px)); width: min(272px, calc(100% - 32px)); padding: 12px 14px; display: flex; flex-direction: column; gap: 11px; max-height: calc(100% - 32px); overflow-y: auto; }
+  .field { display: flex; flex-direction: column; gap: 3px; }
+  .field .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  label { font-size: 13.5px; font-weight: 500; }
+  output { font-family: var(--font-data); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .check { display: flex; align-items: center; gap: 6px; font-family: var(--font-label); font-size: 13.5px; font-weight: 500; }
+  .check input { accent-color: var(--accent); margin: 0; }
+  button.plain { font-family: var(--font-label); font-size: 13.5px; font-weight: 600; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+  button.plain.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--ref); outline-offset: 2px; }
+  details { border-top: 1px solid var(--line); padding-top: 9px; }
+  summary { font-size: 13.5px; font-weight: 600; cursor: pointer; }
+  details p { margin: 7px 0 0; font-size: 13px; color: var(--muted); max-width: 60ch; }
+  details code { font-family: var(--font-data); font-size: 11.5px; color: var(--ink); }
+
+  #tracebox { left: max(16px, env(safe-area-inset-left, 0px)); bottom: 16px; width: min(380px, calc(100% - 32px)); padding: 10px 12px 8px; }
+  #trace { display: block; width: 100%; height: 104px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; font-family: var(--font-label); font-size: 12.5px; color: var(--muted); }
+  .legend i { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--accent); vertical-align: middle; margin-right: 5px; }
+  .legend i.mean { border-top: 2px dashed var(--ink); }
+  .legend i.ref { border-top: 2px solid var(--ref); }
+
+  #hint { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); margin: 0; padding: 5px 11px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line); font-family: var(--font-label); font-size: 13px; color: var(--muted); white-space: nowrap; }
+  #zoom { position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); bottom: 16px; display: flex; flex-direction: column; }
+  #zoom button { width: 34px; height: 34px; font-family: var(--font-data); font-size: 17px; line-height: 1; background: var(--panel); color: var(--ink); border: 1px solid var(--line); cursor: pointer; }
+  #zoom button:first-child { border-radius: 4px 4px 0 0; border-bottom: 0; }
+  #zoom button:last-child { border-radius: 0 0 4px 4px; }
+  #toggleControls { display: none; }
+
+  @media (max-width: 980px) { #hint { display: none; } }
+  @media (max-width: 720px) {
+    #console { width: auto; right: max(16px, env(safe-area-inset-right, 0px)); padding: 10px 12px; gap: 8px; }
+    #toggleControls { display: inline-block; }
+    .read { grid-template-columns: 1fr 1fr; column-gap: 14px; }
+    .read div { flex-direction: column; gap: 0; align-items: flex-start; }
+    .read .wide { display: none; }
+    dd { text-align: left; }
+    #controls { top: auto; bottom: 16px; left: max(16px, env(safe-area-inset-left, 0px)); width: auto; max-height: 62%; z-index: 3; }
+    #tracebox { width: auto; right: calc(max(16px, env(safe-area-inset-right, 0px)) + 44px); }
+    #trace { height: 70px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="view" aria-label="Top-down view of a ship breaking through sea ice"></canvas>
+
+  <section class="panel" id="console" aria-label="Readouts">
+    <header>
+      <h1>Icebreaker Lab</h1>
+      <button class="plain" id="toggleControls" aria-expanded="false" aria-controls="controls">Controls</button>
+    </header>
+    <div class="seg" role="group" aria-label="Ice conditions">
+      <button data-sc="level" aria-pressed="true">Level ice</button>
+      <button data-sc="floes" aria-pressed="false">Large floes</button>
+      <button data-sc="pack" aria-pressed="false">Broken pack</button>
+    </div>
+    <dl class="read">
+      <div><dt>Speed</dt><dd id="rSpeed">0.0 m/s</dd></div>
+      <div><dt>Ice resistance, 10 s mean</dt><dd id="rIce">0 kN</dd></div>
+      <div class="wide"><dt>Lindqvist formula, same speed</dt><dd id="rLq">0 kN</dd></div>
+      <div><dt>Cusps broken · floes split</dt><dd id="rBreaks">0 · 0</dd></div>
+      <div><dt>Ice bodies</dt><dd id="rBodies">0</dd></div>
+      <div class="wide"><dt>Physics cost</dt><dd id="rPhys">0 ms</dd></div>
+    </dl>
+  </section>
+
+  <section class="panel" id="controls" aria-label="Controls">
+    <div class="field">
+      <div class="top"><label for="h">Ice thickness</label><output id="hOut" for="h">0.60 m</output></div>
+      <input type="range" id="h" min="0.2" max="1.6" step="0.05" value="0.6">
+    </div>
+    <div class="field">
+      <div class="top"><label for="sf">Flexural strength</label><output id="sfOut" for="sf">0.55 MPa</output></div>
+      <input type="range" id="sf" min="0.25" max="1" step="0.05" value="0.55">
+    </div>
+    <div class="field">
+      <div class="top"><label for="thr">Throttle</label><output id="thrOut" for="thr">100 %</output></div>
+      <input type="range" id="thr" min="-100" max="100" step="5" value="100">
+    </div>
+    <div class="seg" role="group" aria-label="Simulation speed">
+      <button data-sp="1" aria-pressed="true">1×</button>
+      <button data-sp="2" aria-pressed="false">2×</button>
+      <button data-sp="4" aria-pressed="false">4×</button>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="loads"> Show loads</label>
+      <label class="check"><input type="checkbox" id="cracks" checked> Show cracks</label>
+    </div>
+    <div class="row">
+      <button class="plain primary" id="pause">Pause</button>
+      <button class="plain" id="restart">Restart</button>
+    </div>
+    <details>
+      <summary>How the ice breaks</summary>
+      <p>The hull waterline is checked every half metre against each ice sheet. Where they overlap, the ice edge is crushed at a fixed pressure on the sloping hull face, which pushes the edge down as well as back.</p>
+      <p>When the downward force passes the bearing capacity of the ice wedge, <code>P = C_f (θ/π)² σ_f h²</code>, a cusp of radius <code>R = C_l ℓ (1 + C_v v_n)</code> snaps off and is cut into wedges by radial cracks. ℓ is the characteristic length of a floating plate.</p>
+      <p>A finite floe splits from the contact point when the in-plane force passes <code>h K_Ic √L</code>, with L the distance the crack must run.</p>
+      <p>Broken pieces are rigid bodies. Those pushed under the hull add the submersion term of Lindqvist's resistance formula.</p>
+    </details>
+  </section>
+
+  <section class="panel" id="tracebox" aria-label="Ice force history">
+    <h2>Ice force along the hull, last 20 s</h2>
+    <canvas id="trace"></canvas>
+    <div class="legend"><span><i></i>simulated</span><span><i class="mean"></i>10 s mean</span><span id="lqLegend"><i class="ref"></i>Lindqvist</span></div>
+  </section>
+
+  <p id="hint">Click the ice to set a course · A/D steer · W/S throttle · scroll to zoom</p>
+  <div id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
+</div>
+
+<script src="icebreaker-core.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const cv = $('view'), ctx = cv.getContext('2d'), tr = $('trace'), tctx = tr.getContext('2d');
+  const TS = 256, vnoise = IceSim.vnoise, hash2 = IceSim.hash2;
+  const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+  let sim = null, scenario = 'level', seed = 7, speed = 1, W = 1, Hh = 1, dpr = 1, zoom = 1, showLoads = false, showCracks = true;
+  let paused = matchMedia('(prefers-reduced-motion: reduce)').matches, physMs = 0, firstFrame = true, frameNo = 0;
+  const cam = { x: 0, y: 0, s: 4 }, tiles = new WeakMap(), wake = [], keys = Object.create(null);
+  const TR_N = 600, trace = new Float32Array(TR_N); let trPos = 0, trCount = 0, trClock = 0;
+  let col = { sea: '#113a4a', ink: '#0f2530', muted: '#4a626e', line: 'rgba(0,0,0,.2)', accent: '#bd3620', ref: '#1b6f8c' };
+
+  function readTheme() {
+    const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim() || null;
+    col = { sea: g('--sea') || col.sea, ink: g('--ink') || col.ink, muted: g('--muted') || col.muted, line: g('--line') || col.line, accent: g('--accent') || col.accent, ref: g('--ref') || col.ref };
+  }
+
+  function start() {
+    sim = IceSim.create({ scenario, seed, h: +$('h').value, sigF: +$('sf').value * 1e6 });
+    sim.ship.thr = +$('thr').value / 100;
+    cam.x = sim.ship.x + 50; cam.y = sim.ship.y; wake.length = 0; trace.fill(0); trPos = trCount = 0; trClock = 0; firstFrame = true;
+    $('lqLegend').hidden = scenario !== 'level';
+  }
+
+  // ---------------------------------------------------------------- ice textures, painted from the distance field in 256-texel tiles
+  function getTiles(S) {
+    let T = tiles.get(S); if (T) return T;
+    const tex = S.cell / 2, wt = (S.nx - 1) * 2, ht = (S.ny - 1) * 2;
+    T = { tex, wt, ht, ntx: Math.ceil(wt / TS), nty: Math.ceil(ht / TS), map: new Map() };
+    tiles.set(S, T);
+    S.onDirty = (x0, y0, x1, y1) => {
+      const a = Math.floor(x0 / tex) - 2, b = Math.floor(y0 / tex) - 2, c = Math.ceil(x1 / tex) + 2, d = Math.ceil(y1 / tex) + 2;
+      const i0 = Math.max(0, Math.floor((a - 1) / TS)), i1 = Math.min(T.ntx - 1, Math.floor((c + 1) / TS)), j0 = Math.max(0, Math.floor((b - 1) / TS)), j1 = Math.min(T.nty - 1, Math.floor((d + 1) / TS));
+      for (let tj = j0; tj <= j1; tj++) for (let ti = i0; ti <= i1; ti++) {
+        const t = T.map.get(tj * T.ntx + ti); if (!t) continue;
+        const r0 = Math.max(0, a - t.ox), r1 = Math.max(0, b - t.oy), r2 = Math.min(t.w, c - t.ox), r3 = Math.min(t.h, d - t.oy);
+        if (r2 <= r0 || r3 <= r1) continue;
+        if (t.dirty) { const q = t.dirty; q[0] = Math.min(q[0], r0); q[1] = Math.min(q[1], r1); q[2] = Math.max(q[2], r2); q[3] = Math.max(q[3], r3); }
+        else t.dirty = [r0, r1, r2, r3];
+      }
+    };
+    return T;
+  }
+
+  function paint(S, T, t, x0, y0, x1, y1) {
+    const w = x1 - x0, h = y1 - y0; if (w <= 0 || h <= 0) return;
+    const tex = T.tex, GX0 = t.ox + x0, GY0 = t.oy + y0, C = 4, seed = S.seed;
+    // snow tone and thickness vary slowly: sample them every fourth texel
+    const cx0 = Math.floor(GX0 / C), cy0 = Math.floor(GY0 / C), cw = Math.floor((GX0 + w) / C) - cx0 + 2, chh = Math.floor((GY0 + h) / C) - cy0 + 2;
+    const tone = new Float32Array(cw * chh), thick = new Float32Array(cw * chh);
+    for (let j = 0; j < chh; j++) for (let i = 0; i < cw; i++) {
+      const lx = (cx0 + i) * C * tex, ly = (cy0 + j) * C * tex, gx = lx + S.hox, gy = ly + S.hoy;
+      thick[j * cw + i] = S.hmul(lx, ly);
+      tone[j * cw + i] = 0.65 * vnoise(gx / 13, gy / 13, seed + 11) + 0.35 * vnoise(gx / 4.1, gy / 4.1, seed + 12);
+    }
+    const img = t.g.createImageData(w, h), d = img.data, s = S.sdf, nx = S.nx, ny = S.ny, inv = S.inv, gxo = Math.round(S.hox / tex), gyo = Math.round(S.hoy / tex);
+    for (let py = 0; py < h; py++) {
+      const GY = GY0 + py; let gy = (GY + 0.5) * tex * inv; if (gy > ny - 1.001) gy = ny - 1.001; else if (gy < 0) gy = 0;
+      const j = gy | 0, fy = gy - j, cyf = (GY + 0.5) / C - cy0, cj = cyf | 0, cfy = cyf - cj;
+      for (let px = 0; px < w; px++) {
+        const GX = GX0 + px; let gx = (GX + 0.5) * tex * inv; if (gx > nx - 1.001) gx = nx - 1.001; else if (gx < 0) gx = 0;
+        const i = gx | 0, fx = gx - i, k = j * nx + i;
+        const v = (s[k] * (1 - fx) + s[k + 1] * fx) * (1 - fy) + (s[k + nx] * (1 - fx) + s[k + nx + 1] * fx) * fy;
+        if (v >= 0.9) continue;
+        const a = v <= -0.5 * tex ? 1 : v >= 0.5 * tex ? 0 : 0.5 - v / tex;
+        let r = 0, g = 0, b = 0;
+        if (a > 0) {
+          const cxf = (GX + 0.5) / C - cx0, ci = cxf | 0, cfx = cxf - ci, q = cj * cw + ci;
+          const hm = (thick[q] * (1 - cfx) + thick[q + 1] * cfx) * (1 - cfy) + (thick[q + cw] * (1 - cfx) + thick[q + cw + 1] * cfx) * cfy;
+          const tn = (tone[q] * (1 - cfx) + tone[q + 1] * cfx) * (1 - cfy) + (tone[q + cw] * (1 - cfx) + tone[q + cw + 1] * cfx) * cfy;
+          const sp = hash2(GX + gxo, GY + gyo, 5) - 0.5, thin = clamp((1 - hm) * 2.4, 0, 0.75), ridge = clamp((hm - 1.25) * 1.6, 0, 1);
+          const L = 238 + 8 * tn + 5 * sp + ridge * (10 + 22 * sp);
+          r = L - 62 * thin; g = L - 36 * thin + 2; b = L - 20 * thin + 5;                 // thin ice reads grey-blue, ridges bright and rough
+          if (v > -0.9) { const e = (v + 0.9) / 0.9, e2 = e * e; r -= 50 * e2; g -= 22 * e2; b -= 10 * e2; }   // wet rim
+        }
+        const hv = 1 - v / 0.9, ha = v > 0 ? 0.5 * hv * hv : 0.5, oa = a + (1 - a) * ha, o = (py * w + px) * 4;   // submerged ice foot shows turquoise
+        d[o] = (r * a + 96 * ha * (1 - a)) / oa; d[o + 1] = (g * a + 186 * ha * (1 - a)) / oa; d[o + 2] = (b * a + 198 * ha * (1 - a)) / oa; d[o + 3] = 255 * oa;
+      }
+    }
+    t.g.putImageData(img, x0, y0);
+  }
+
+  function tileAt(S, T, ti, tj, budget) {
+    const key = tj * T.ntx + ti; let t = T.map.get(key);
+    if (!t) {
+      if (budget.n <= 0) return null; budget.n--;
+      const w = Math.min(TS, T.wt - ti * TS) + 2, h = Math.min(TS, T.ht - tj * TS) + 2; if (w <= 2 || h <= 2) return null;
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      t = { ox: ti * TS - 1, oy: tj * TS - 1, w, h, c, g: c.getContext('2d'), dirty: null }; T.map.set(key, t); paint(S, T, t, 0, 0, w, h);
+    } else if (t.dirty) { const q = t.dirty; t.dirty = null; paint(S, T, t, q[0], q[1], q[2], q[3]); }
+    return t;
+  }
+
+  const L2 = [0, 0];
+  function drawSheet(S, vx0, vy0, vx1, vy1, budget) {
+    const T = getTiles(S), span = TS * T.tex;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (let c = 0; c < 4; c++) { S.toLocal(c & 1 ? vx1 : vx0, c & 2 ? vy1 : vy0, L2); x0 = Math.min(x0, L2[0]); x1 = Math.max(x1, L2[0]); y0 = Math.min(y0, L2[1]); y1 = Math.max(y1, L2[1]); }
+    const i0 = Math.max(0, Math.floor(x0 / span)), i1 = Math.min(T.ntx - 1, Math.floor(x1 / span)), j0 = Math.max(0, Math.floor(y0 / span)), j1 = Math.min(T.nty - 1, Math.floor(y1 / span));
+    ctx.save(); ctx.transform(S.cs, S.sn, -S.sn, S.cs, S.x, S.y); ctx.translate(-S.cx, -S.cy);
+    for (let tj = j0; tj <= j1; tj++) for (let ti = i0; ti <= i1; ti++) {
+      const t = tileAt(S, T, ti, tj, budget); if (t) ctx.drawImage(t.c, t.ox * T.tex, t.oy * T.tex, t.w * T.tex, t.h * T.tex);
+    }
+    const c = S.cracks;
+    if (showCracks && c.length) {
+      ctx.beginPath();
+      for (let i = 0; i < c.length; i += 4) { if (c[i] < x0 - 6 || c[i] > x1 + 6 || c[i + 1] < y0 - 6 || c[i + 1] > y1 + 6) continue; ctx.moveTo(c[i], c[i + 1]); ctx.lineTo(c[i + 2], c[i + 3]); }
+      ctx.lineWidth = Math.max(0.07, 0.9 / cam.s); ctx.strokeStyle = 'rgba(46,98,128,0.6)'; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------- water, wake, pieces, ship
+  let waterPat = null;
+  function makeWater() {
+    const n = 256, c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data, P = 8;
+    const pn = (x, y, s) => { const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy), m = (a, b) => hash2(((a % P) + P) % P, ((b % P) + P) % P, s);
+      const a = m(ix, iy), b = m(ix + 1, iy), cc = m(ix, iy + 1), dd = m(ix + 1, iy + 1); return a + (b - a) * ux + (cc - a) * uy + (a - b - cc + dd) * ux * uy; };
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const v = pn(x / 32, y / 32, 3), w = pn(x / 16 + 3.3, y / 16 + 1.7, 9), o = (y * n + x) * 4, t = v * 0.65 + w * 0.35;
+      d[o] = 150; d[o + 1] = 215; d[o + 2] = 230; d[o + 3] = Math.max(0, t - 0.45) * 70;
+    }
+    g.putImageData(img, 0, 0); waterPat = ctx.createPattern(c, 'repeat'); waterPat.setTransform(new DOMMatrix().scale(0.3));
+  }
+
+  function drawPieces(sub, x0, y0, x1, y1) {
+    const pcs = sim.pieces, paths = sub ? [new Path2D()] : [new Path2D(), new Path2D(), new Path2D()];
+    for (let q = 0; q < pcs.length; q++) {
+      const p = pcs[q]; if (p.sub !== sub || p.x + p.r < x0 || p.x - p.r > x1 || p.y + p.r < y0 || p.y - p.r > y1) continue;
+      const P = paths[sub ? 0 : p.tint], X = p.wx, Y = p.wy; P.moveTo(X[0], Y[0]); for (let k = 1; k < p.n; k++) P.lineTo(X[k], Y[k]); P.closePath();
+    }
+    if (sub) { ctx.fillStyle = 'rgba(112,192,204,0.5)'; ctx.fill(paths[0]); return; }
+    const fills = ['#f0f4f6', '#c5dae4', '#e1edf2'];
+    ctx.lineWidth = Math.max(0.06, 0.7 / cam.s); ctx.strokeStyle = 'rgba(38,88,114,0.5)'; ctx.lineJoin = 'round';
+    for (let i = 0; i < 3; i++) { ctx.fillStyle = fills[i]; ctx.fill(paths[i]); ctx.stroke(paths[i]); }
+  }
+
+  function hullPath(H, kx, ky) { ctx.beginPath(); ctx.moveTo(H.px[0] * kx, H.py[0] * ky); for (let i = 2; i < H.n; i += 2) ctx.lineTo(H.px[i] * kx, H.py[i] * ky); ctx.closePath(); }
+  function drawShip() {
+    const s = sim.ship, H = s.hull, k = s.L / 76, b = s.B / 18;
+    ctx.save(); ctx.translate(s.x + 1.5, s.y + 2.2); ctx.rotate(s.th); hullPath(H, 1, 1); ctx.fillStyle = 'rgba(3,18,26,0.3)'; ctx.fill(); ctx.restore();
+    ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.th);
+    hullPath(H, 1, 1); ctx.fillStyle = '#b3331e'; ctx.fill(); ctx.lineWidth = 0.3; ctx.strokeStyle = '#6a1b10'; ctx.stroke();
+    hullPath(H, 0.955, 0.84); ctx.fillStyle = '#d5cdbc'; ctx.fill();
+    ctx.fillStyle = '#566972'; ctx.beginPath(); ctx.arc(-25 * k, 0, 5.6 * b, 0, 6.2832); ctx.fill();                                  // helideck
+    ctx.lineWidth = 0.35; ctx.strokeStyle = '#eef2f2'; ctx.beginPath(); ctx.arc(-25 * k, 0, 4.2 * b, 0, 6.2832); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-26.2 * k, -1.5); ctx.lineTo(-26.2 * k, 1.5); ctx.moveTo(-23.8 * k, -1.5); ctx.lineTo(-23.8 * k, 1.5); ctx.moveTo(-26.2 * k, 0); ctx.lineTo(-23.8 * k, 0); ctx.stroke();
+    ctx.fillStyle = '#28353d'; ctx.fillRect(-9 * k, -2.3 * b, 5 * k, 4.6 * b); ctx.fillStyle = '#b3331e'; ctx.fillRect(-7.4 * k, -2.3 * b, 1.6 * k, 4.6 * b);   // funnel
+    ctx.fillStyle = '#f3eee3'; ctx.strokeStyle = '#aaa391'; ctx.lineWidth = 0.2; ctx.fillRect(-2 * k, -6.2 * b, 20 * k, 12.4 * b); ctx.strokeRect(-2 * k, -6.2 * b, 20 * k, 12.4 * b);
+    ctx.fillStyle = '#e6dfd0'; ctx.fillRect(12.5 * k, -8.3 * b, 5.5 * k, 16.6 * b); ctx.strokeRect(12.5 * k, -8.3 * b, 5.5 * k, 16.6 * b);                    // bridge wings
+    ctx.fillStyle = '#22313a'; ctx.fillRect(16.9 * k, -7.6 * b, 0.8 * k, 15.2 * b);
+    ctx.fillStyle = '#8c8676'; ctx.beginPath(); ctx.arc(28 * k, 0, 0.9, 0, 6.2832); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawOverlays() {
+    const s = sim.ship, H = s.hull, ap = sim.ap;
+    if (ap.on && ap.hasTarget) {
+      ctx.lineWidth = Math.max(0.15, 1.2 / cam.s); ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.setLineDash([2, 2]);
+      ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(ap.tx, ap.ty); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(ap.tx, ap.ty, Math.max(2.2, 7 / cam.s), 0, 6.2832); ctx.stroke();
+    }
+    if (!showLoads) return;
+    const cs = Math.cos(s.th), sn = Math.sin(s.th), ev = sim.events;
+    ctx.lineWidth = Math.max(0.2, 1.5 / cam.s); ctx.strokeStyle = '#ff9a3c'; ctx.beginPath();
+    for (let i = 0; i < H.n; i++) { const f = H.f[i]; if (f <= 0) continue; const l = Math.min(14, f / 1.2e5), nx = cs * H.nx[i] - sn * H.ny[i], ny = sn * H.nx[i] + cs * H.ny[i]; ctx.moveTo(H.wx[i], H.wy[i]); ctx.lineTo(H.wx[i] + nx * l, H.wy[i] + ny * l); }
+    ctx.stroke();
+    for (let i = Math.max(0, ev.length - 160); i < ev.length; i += 4) {
+      const age = sim.t - ev[i + 3]; if (age > 0.8) continue;
+      ctx.strokeStyle = 'rgba(255,154,60,' + (0.9 * (1 - age / 0.8)).toFixed(3) + ')'; ctx.beginPath(); ctx.arc(ev[i], ev[i + 1], ev[i + 2], 0, 6.2832); ctx.stroke();
+    }
+  }
+
+  function render(dtReal) {
+    const s = sim.ship; cam.s = clamp(Math.min(W / 300, Hh / 150), 1.3, 7) * zoom;
+    const look = Math.min(W, Hh) / cam.s * 0.2, tx = s.x + Math.cos(s.th) * look, ty = s.y + Math.sin(s.th) * look, k = firstFrame ? 1 : 1 - Math.exp(-dtReal * 2.5);
+    cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = col.sea; ctx.fillRect(0, 0, W, Hh);
+    const sc = cam.s; ctx.setTransform(sc * dpr, 0, 0, sc * dpr, (W / 2 - cam.x * sc) * dpr, (Hh / 2 - cam.y * sc) * dpr);
+    const x0 = cam.x - W / 2 / sc, x1 = cam.x + W / 2 / sc, y0 = cam.y - Hh / 2 / sc, y1 = cam.y + Hh / 2 / sc;
+    if (waterPat) { ctx.fillStyle = waterPat; ctx.fillRect(x0, y0, x1 - x0, y1 - y0); }
+    for (let i = 0; i < wake.length; i++) { const p = wake[i], a = p.age / p.life; ctx.fillStyle = 'rgba(205,234,240,' + (0.2 * (1 - a) * (1 - a)).toFixed(3) + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, 1 + 4.5 * a, 0, 6.2832); ctx.fill(); }
+    drawPieces(true, x0, y0, x1, y1);
+    const budget = { n: firstFrame ? 200 : 2 }, m = 24;
+    for (const S of sim.sheets) { if (S.x + S.R < x0 - m || S.x - S.R > x1 + m || S.y + S.R < y0 - m || S.y - S.R > y1 + m) continue; drawSheet(S, x0 - m, y0 - m, x1 + m, y1 + m, budget); }
+    drawPieces(false, x0, y0, x1, y1);
+    drawShip(); drawOverlays();
+    firstFrame = false;
+  }
+
+  // ---------------------------------------------------------------- force trace
+  function niceCeil(v) { const e = Math.pow(10, Math.floor(Math.log10(v))), f = v / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * e; }
+  function fmtF(n) { const a = Math.abs(n); return a >= 1e6 ? (n / 1e6).toFixed(2) + ' MN' : Math.round(n / 1e3) + ' kN'; }
+  function meanForce(nLast) { const n = Math.min(nLast, trCount); if (!n) return 0; let sum = 0; for (let i = 0; i < n; i++) sum += trace[(trPos - 1 - i + TR_N) % TR_N]; return sum / n; }
+  function drawTrace() {
+    const w = tr.clientWidth, h = tr.clientHeight; if (!w || !h) return;
+    if (tr.width !== Math.round(w * dpr) || tr.height !== Math.round(h * dpr)) { tr.width = Math.round(w * dpr); tr.height = Math.round(h * dpr); }
+    const g = tctx; g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+    const padL = 52, padB = 4, padT = 6, pw = w - padL - 2, ph = h - padT - padB, lq = scenario === 'level' ? IceSim.lindqvist(sim, sim.P.h, Math.max(sim.ship.u, 0)).total : 0;
+    const srt = Float32Array.from(trace.subarray(0, Math.max(1, trCount))).sort(), p96 = srt[Math.floor(0.96 * (srt.length - 1))];
+    const top = niceCeil(Math.max(2e5, p96 * 1.15, lq * 1.1)), Y = v => padT + ph * (1 - clamp(v / top, -0.05, 1)), ax = v => (v >= 1e6 ? +(v / 1e6).toFixed(2) + ' MN' : Math.round(v / 1e3) + ' kN');
+    g.font = '10.5px "IBM Plex Mono", ui-monospace, Menlo, monospace'; g.textAlign = 'right'; g.textBaseline = 'middle'; g.lineWidth = 1;
+    for (let t = 0; t <= 2; t++) { const v = top * t / 2, y = Math.round(Y(v)) + 0.5; g.strokeStyle = col.line; g.beginPath(); g.moveTo(padL, y); g.lineTo(w - 2, y); g.stroke(); g.fillStyle = col.muted; g.fillText(ax(v), padL - 6, Math.min(h - 6, Math.max(6, y))); }
+    const n = trCount; if (n < 2) return;
+    g.beginPath();
+    for (let i = 0; i < n; i++) { const v = trace[(trPos - n + i + TR_N) % TR_N], x = padL + pw * (TR_N - n + i) / (TR_N - 1), y = Y(v); if (i) g.lineTo(x, y); else g.moveTo(x, y); }
+    g.strokeStyle = col.accent; g.lineWidth = 1.3; g.lineJoin = 'round'; g.stroke();
+    g.lineTo(padL + pw, Y(0)); g.lineTo(padL + pw * (TR_N - n) / (TR_N - 1), Y(0)); g.closePath(); g.globalAlpha = 0.16; g.fillStyle = col.accent; g.fill(); g.globalAlpha = 1;
+    const mean = meanForce(300); g.setLineDash([5, 4]); g.strokeStyle = col.ink; g.lineWidth = 1.2; g.beginPath(); g.moveTo(padL, Y(mean)); g.lineTo(w - 2, Y(mean)); g.stroke(); g.setLineDash([]);
+    if (lq > 0) { g.strokeStyle = col.ref; g.lineWidth = 1.6; g.beginPath(); g.moveTo(padL, Y(lq)); g.lineTo(w - 2, Y(lq)); g.stroke(); }
+  }
+
+  function readouts() {
+    const s = sim.ship, v = Math.hypot(s.u, s.v), ns = sim.sheets.length;
+    $('rSpeed').textContent = v.toFixed(1) + ' m/s · ' + (v * 1.944).toFixed(1) + ' kn';
+    $('rIce').textContent = fmtF(meanForce(300));
+    $('rLq').textContent = scenario === 'level' ? fmtF(IceSim.lindqvist(sim, sim.P.h, Math.max(s.u, 0)).total) : 'level ice only';
+    $('rBreaks').textContent = sim.stats.cusps + ' · ' + sim.stats.splits;
+    $('rBodies').textContent = sim.pieces.length + ' pieces · ' + ns + (ns === 1 ? ' sheet' : ' sheets');
+    $('rPhys').textContent = physMs.toFixed(1) + ' ms per frame';
+    const t = Math.round(s.thr * 100); if (+$('thr').value !== t) { $('thr').value = t; $('thrOut').textContent = t + ' %'; }
+  }
+
+  // ---------------------------------------------------------------- main loop
+  let last = 0;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const dtReal = Math.min(0.05, (now - last) / 1000 || 0.016); last = now; frameNo++;
+    if (frameNo % 45 === 1) readTheme();
+    const s = sim.ship;
+    if (keys.a || keys.arrowleft || keys.d || keys.arrowright) { sim.ap.on = false; sim.ap.hasTarget = false; s.rudCmd = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0); }
+    else if (!sim.ap.on) s.rudCmd = 0;
+    if (keys.w || keys.arrowup) s.thr = clamp(s.thr + 0.7 * dtReal, -1, 1);
+    if (keys.s || keys.arrowdown) s.thr = clamp(s.thr - 0.7 * dtReal, -1, 1);
+    if (!paused) {
+      const t0 = performance.now(), n0 = sim.accN; sim.accX = 0; sim.accN = 0;
+      IceSim.advance(sim, dtReal * speed);
+      physMs += (performance.now() - t0 - physMs) * 0.08;
+      if (sim.accN) {
+        trClock += sim.accN * sim.dt;
+        if (trClock >= 1 / 30) { trace[trPos] = -sim.accX / sim.accN; trPos = (trPos + 1) % TR_N; if (trCount < TR_N) trCount++; trClock = 0; }
+      }
+      const sp = Math.abs(s.u);
+      if (sp > 0.4 && s.thr > 0.05) for (let q = 0; q < 2; q++) { const c = Math.cos(s.th), sn = Math.sin(s.th), by = (q ? 3.2 : -3.2) + (Math.random() - 0.5) * 2, bx = -s.L / 2 - 1; wake.push({ x: s.x + c * bx - sn * by, y: s.y + sn * bx + c * by, vx: -c * 1.5 * s.thr, vy: -sn * 1.5 * s.thr, age: 0, life: 5 + 3 * Math.random() }); }
+      const dts = dtReal * speed; let w = 0;
+      for (let i = 0; i < wake.length; i++) { const p = wake[i]; p.age += dts; if (p.age >= p.life) continue; p.x += p.vx * dts; p.y += p.vy * dts; p.vx *= 0.97; p.vy *= 0.97; wake[w++] = p; }
+      wake.length = w;
+    }
+    render(dtReal);
+    if (frameNo % 3 === 0) drawTrace();
+    if (frameNo % 12 === 0) readouts();
+  }
+
+  function resize() {
+    const r = $('app').getBoundingClientRect(); W = Math.max(1, r.width); Hh = Math.max(1, r.height); dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(Hh * dpr);
+  }
+
+  // ---------------------------------------------------------------- controls
+  function press(group, btn) { for (const b of group.querySelectorAll('button')) b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'); }
+  for (const b of document.querySelectorAll('[data-sc]')) b.addEventListener('click', () => { scenario = b.dataset.sc; press(b.parentNode, b); start(); });
+  for (const b of document.querySelectorAll('[data-sp]')) b.addEventListener('click', () => { speed = +b.dataset.sp; press(b.parentNode, b); });
+  $('h').addEventListener('input', e => { const v = +e.target.value; $('hOut').textContent = v.toFixed(2) + ' m'; IceSim.setThickness(sim, v); });
+  $('sf').addEventListener('input', e => { const v = +e.target.value; $('sfOut').textContent = v.toFixed(2) + ' MPa'; sim.P.sigF = v * 1e6; sim.Rs0 = IceSim.lindqvist(sim, sim.P.h, 0).Rs; });
+  $('thr').addEventListener('input', e => { const v = +e.target.value; $('thrOut').textContent = v + ' %'; sim.ship.thr = v / 100; });
+  for (const id of ['h', 'sf', 'thr']) $(id).addEventListener('change', e => e.target.blur());
+  $('loads').addEventListener('change', e => { showLoads = e.target.checked; });
+  $('cracks').addEventListener('change', e => { showCracks = e.target.checked; });
+  function setPaused(p) { paused = p; $('pause').textContent = p ? 'Play' : 'Pause'; }
+  $('pause').addEventListener('click', () => setPaused(!paused));
+  $('restart').addEventListener('click', () => { seed++; start(); });
+  $('zin').addEventListener('click', () => { zoom = clamp(zoom * 1.3, 0.35, 5); });
+  $('zout').addEventListener('click', () => { zoom = clamp(zoom / 1.3, 0.35, 5); });
+  const narrow = matchMedia('(max-width: 720px)');
+  function layout() { const c = $('controls'); c.hidden = narrow.matches && $('toggleControls').getAttribute('aria-expanded') !== 'true'; $('tracebox').hidden = narrow.matches && !c.hidden; }
+  $('toggleControls').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-expanded', b.getAttribute('aria-expanded') === 'true' ? 'false' : 'true'); layout(); });
+  narrow.addEventListener('change', layout);
+
+  const KEYS = ['a', 'd', 'w', 's', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'];
+  addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return; const k = e.key.toLowerCase(), t = e.target;
+    if (t && t.tagName === 'INPUT' && t.type === 'range') return;
+    if (KEYS.includes(k)) { keys[k] = true; e.preventDefault(); }
+    else if (k === ' ' && !(t && t.tagName === 'BUTTON')) { setPaused(!paused); e.preventDefault(); }
+  });
+  addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+  addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+  let down = null;
+  cv.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY }; });
+  cv.addEventListener('pointerup', e => {
+    if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) { down = null; return; } down = null;
+    const r = cv.getBoundingClientRect(), ap = sim.ap; ap.tx = cam.x + (e.clientX - r.left - W / 2) / cam.s; ap.ty = cam.y + (e.clientY - r.top - Hh / 2) / cam.s; ap.hasTarget = true; ap.on = true;
+  });
+  cv.addEventListener('wheel', e => { e.preventDefault(); zoom = clamp(zoom * Math.exp(-e.deltaY * 0.0015), 0.35, 5); }, { passive: false });
+
+  function boot() {
+    readTheme(); resize(); makeWater(); layout(); setPaused(paused); start();
+    new ResizeObserver(resize).observe($('app'));
+    window.__ice = { get sim() { return sim; }, cam, set(k, v) { if (k === 'zoom') zoom = v; if (k === 'loads') showLoads = v; } };
+    requestAnimationFrame(frame);
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

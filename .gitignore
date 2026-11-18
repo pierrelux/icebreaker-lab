@@ -1,0 +1,7 @@
+.claude/
+__pycache__/
+*.pyc
+bench-*.out
+.DS_Store
+# fragment published as a claude.ai artifact; index.html is the standalone page
+icebreaker.html
