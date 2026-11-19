@@ -63,7 +63,7 @@ PLACES = {
 
 CLASS_NAMES = ["icebreaker", "bulk", "tanker", "container", "ferry", "ropax"]
 CLASSES = [
-    ships.ICEBREAKER,                                                        # the 76 m ship of icebreaker_jax.py
+    ships.ICEBREAKER,                                                        # the 76 m ship of icebreaker_jax.py, with its hull-scale curves
     #                 L      B     T     kW      kn   stem entrance windage
     ships.from_power(199.9, 23.2, 9.0, 8000.0, 14.5, 60.0, 30.0, 600.0),     # Federal Montreal class laker, ice class 1C: L, B [S]; rest [A]
     ships.from_power(135.0, 23.5, 7.9, 5450.0, 13.5, 50.0, 30.0, 450.0),     # Mia Desgagnés, Polar Class 7: L, B, T, kW, speed [V]

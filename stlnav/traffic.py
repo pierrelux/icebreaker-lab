@@ -7,7 +7,8 @@ What a traffic ship does
   * Its speed is the lower of its service speed and the speed its class can hold in the ice where it is
     (ships.attainable_speed), plus the current along the route.
   * In ice it does not overtake: behind another ship on the same route it closes to `d_keep` and then
-    matches speed, and within `d_channel` it gets the lower resistance of the leader's track. An
+    matches speed, and within `d_channel` it gets the lower resistance of the leader's track (the curve
+    `track` of its class, see ships.py). An
     icebreaker with a ship behind it slows down to keep that ship in its track. This is how convoys form. In open water ships on the same route pass freely.
   * Towards the learning ship ("own ship") it applies three collision rules when a close approach is
     predicted (closest approach under `d_risk` within `t_risk`): it slows down if the own ship is crossing
@@ -56,7 +57,6 @@ class TrafficCfg(NamedTuple):
     d_keep: float = 1.0          # km: spacing held in a convoy
     d_channel: float = 3.0       # km: within this distance behind a leader the track is still open
     w_channel: float = 0.15      # km: half-width of that track (own ship)
-    channel: float = 0.4         # PLACEHOLDER: ice resistance in a track, as a share of unbroken ice
     d_risk: float = 1.5          # km
     t_risk: float = 900.0        # s
     slow: float = 0.3            # speed kept while giving way to a crossing ship, share of target
@@ -168,12 +168,13 @@ def step(ts: TrafficState, key, t, dt, own, sample, rt: Routes, classes: ships.S
     cs, sn = jnp.cos(hd), jnp.sin(hd)
 
     # ships ahead on the same route
-    gap = jnp.where(ts.active[None, :] & (ts.route[None, :] == ts.route[:, None]) & (ts.s[None, :] > ts.s[:, None]), ts.s[None, :] - ts.s[:, None], jnp.inf)
+    gap = jnp.where(ts.active[:, None] & ts.active[None, :] & (ts.route[None, :] == ts.route[:, None]) & (ts.s[None, :] > ts.s[:, None]),
+                    ts.s[None, :] - ts.s[:, None], jnp.inf)
     lead = jnp.argmin(gap, axis=1)
     g = jnp.min(gap, axis=1)
     in_ice = conc > cfg.ice_conc
     cls = jax.tree.map(lambda a: a[ts.cls], classes)
-    v_ice = ships.attainable_speed(cls, 1.0, thick, conc, sigF, channel=jnp.where(in_ice & (g < cfg.d_channel), cfg.channel, 1.0))
+    v_ice = ships.attainable_speed(cls, 1.0, thick, conc, sigF, in_track=in_ice & (g < cfg.d_channel))
     target = jnp.minimum(ts.vdes, v_ice)
     queue = in_ice & (g < cfg.d_follow)
     target = jnp.where(queue, jnp.minimum(target, jnp.maximum(ts.v[lead] + (g - cfg.d_keep) * 1e3 / 300.0, 0.0)), target)

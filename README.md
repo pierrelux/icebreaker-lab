@@ -2,7 +2,7 @@
 
 A fast, top-down simulation of a ship breaking sea ice, in two versions:
 
-- **A browser simulator** ([live page](https://pierrelucbacon.com/icebreaker-lab/)): a 76 m icebreaker in a continuous ice sheet, large floes or broken pack, with a live trace of the ice force on the hull. Click the ice to set a course, or steer with A/D and W/S.
+- **A browser simulator** ([live page](https://pierrelucbacon.com/icebreaker-lab/)): a 76 m icebreaker in a continuous ice sheet, large floes or broken pack, with a live trace of the ice force on the hull. Click the ice to set a course, or steer with A/D and W/S. A second view, *St. Lawrence*, sails the same icebreaker through a chart of Gulf ice among generated traffic, and opens the ice under the ship in the first view.
 - **A JAX environment** (`icebreaker_jax.py`): the continuous-sheet physics with fixed array shapes, so `reset` and `step` jit-compile and vmap over thousands of environments.
 
 ## Two scales
@@ -13,10 +13,11 @@ A fast, top-down simulation of a ship breaking sea ice, in two versions:
 | Domain | 600 m × 240 m, 0.5 m grid | Estuary and Gulf of St. Lawrence, 2 km grid |
 | Step | 0.2 s (physics at 360 Hz) | 60 s |
 | Ice | A sheet that the hull crushes and bends | Concentration and thickness fields from the Canadian ice-ocean forecast (CIOPS-East) or ice charts |
-| Ship | 3 degrees of freedom, forces on the waterline | A point with a heading; speed from a resistance formula |
+| Ship | 3 degrees of freedom, forces on the waterline | A point with a heading; speed from a force balance fitted to the hull-scale runs (icebreaker) or from Lindqvist's formula (other ships) |
 | Other ships | none | Generated traffic on real routes |
+| Action | [throttle, rudder]; throttle 1 is full ahead, negative is astern | [throttle, turn]; the same throttle, with negative values counted as 0 |
 
-The route-scale environment is described in [docs/st-lawrence-plan.md](docs/st-lawrence-plan.md) (section "What is built"), with what is sourced and what is a placeholder. Its speed model is not validated: transit times it gives are model output. To check and run it:
+The route-scale environment is described in [docs/st-lawrence-plan.md](docs/st-lawrence-plan.md) (section "What is built"), with what is sourced and what is a placeholder. Neither scale has been compared with measurements, so the transit times it gives are model output. To check and run it:
 
 ```bash
 uv run --no-project --python 3.12 --with jax --with numpy python checks/stlnav_checks.py data/fields_20261117.npz
@@ -27,6 +28,118 @@ uv run --no-project --python 3.12 --with jax --with xarray --with 'netCDF4<1.7.5
 ```
 
 `data/` is not in the repository: the fields come from the archive that `archiver/stl_archive.py` builds on the Mila cluster.
+
+### How the two scales are linked
+
+![The two scales](docs/two-scales.png)
+
+*a. Speed the icebreaker holds in level ice (an unbroken sheet of one thickness) at three throttles. Points: hull-scale runs, mean of 3, with bars of one standard deviation that are mostly smaller than the markers; open markers at zero are runs where the ship stopped. Solid lines: the route-scale model, fitted to those runs. Dashed lines: Lindqvist's formula alone, which the route-scale model used before. b. The same voyage at route scale with and without the fit; the ice is a chart of concentration with one assumed thickness. c. That voyage on the map. d. The hull-scale simulator run in the ice of the marked place.*
+
+`stlnav/hullscale.py` links the two simulators in both directions.
+
+**From hull scale to route scale.** The hull-scale ship is run in level ice at 7 thicknesses and 8 throttles, 3 runs each (panel a). More runs find the throttle below which it stops, and its speed in the channel left by another icebreaker. These runs are reduced to a table, `stlnav/tables/icebreaker.json`, that the route-scale speed model reads:
+
+| Ice thickness (m) | 0.2 | 0.3 | 0.45 | 0.6 | 0.8 | 1.0 | 1.2 |
+|---|---|---|---|---|---|---|---|
+| Ice resistance at 4 m/s, as a multiple of Lindqvist's formula | 0.75 | 0.79 | 0.86 | 0.89 | 0.86 | 0.90 | 0.91 |
+| Lowest throttle at which the ship keeps moving | 0.04 | 0.08 | 0.15 | 0.22 | 0.34 | 0.52 | 0.82 |
+| The same according to Lindqvist's formula | 0.04 | 0.06 | 0.10 | 0.14 | 0.21 | 0.29 | 0.38 |
+| Resistance in another icebreaker's channel, as a share of unbroken ice | 0.79 | 0.73 | 0.65 | 0.63 | 0.57 | 0.56 | 0.52 |
+
+Three things come out of the hull-scale runs that the formula did not give:
+
+- At 4 m/s the moving ship meets 75 to 91% of the resistance in the formula, so it is faster. The multiple also varies with speed (in thick ice it reaches 1.0 near the speed at which the ship stalls), and the table stores it for every thickness and speed.
+- In thick ice the ship stops at a much higher throttle than the formula says: 0.82 against 0.38 in 1.2 m of ice. The mean resistance does not explain this. A ship that moves slowly is brought to rest by a single load peak and then cannot break the sheet from rest.
+- In the channel of another icebreaker the resistance is 52 to 79% of that in unbroken ice. The route-scale model used a placeholder of 40%, so convoys are slower than before.
+
+How well the route-scale model then agrees with the hull-scale simulator (`checks/two_scales.py`, 10 checks, all passing):
+
+| Case | Fitted model | Lindqvist's formula alone |
+|---|---|---|
+| The 46 thickness and throttle pairs it was fitted to: mean and largest difference in speed | 0.2%, 2.3% | 7.0%, 17.7% |
+| New runs between those pairs, ice of 0.25 and 0.5 m | 0.9%, 1.7% | 4.7%, 6.2% |
+| New runs between those pairs, ice of 0.7, 0.9 and 1.1 m | 5.6%, 9.0% | 8.5%, 15.5% |
+| Of 168 runs, 27 stop: runs where route scale disagrees | 3 | 24 |
+| Speed in another icebreaker's channel, new runs | 1.2%, 2.6% | |
+| Flexural strengths of 0.40 and 0.70 MPa (the fit is at 0.55) | 0.7%, 2.2% | |
+
+In ice of 0.7 m and more, the differences of 5 to 9% at new points are not noise: in that check the two hull-scale runs of each case differ by 2.1% at most. The hull-scale resistance varies with thickness in ways that a table of 7 thicknesses does not follow. A finer table needs more runs, about 3 minutes of laptop time per added thickness.
+
+**From route scale to hull scale.** `zoom` reads the ice at a place and time of a route-scale world and runs the hull-scale simulator in level ice of that thickness (panel d):
+
+```python
+from stlnav import hullscale
+z = hullscale.zoom(env, world, lon, lat, t, thr=1.0)     # env, world: a stlnav environment whose class 0 is the icebreaker
+z["hull_speed"], z["route_speed"], z["usable"]            # the two speeds for the same case, and whether the hull-scale run represents the local ice
+```
+
+**What the link does not cover.**
+
+- Concentration. The hull-scale JAX simulator has no floes, so it is a continuous sheet or nothing. The route-scale model still scales resistance by concentration squared, which is a placeholder, and `zoom` marks places under 90% concentration as not usable.
+- The other ship classes. The hull-scale simulator has one hull, so the merchant ships keep Lindqvist's formula. They use the icebreaker's channel values, which is optimistic for ships wider than the channel.
+- Thickness that varies within a 2 km cell, ridges, and wind at hull scale.
+- How fast the speed responds. The hull-scale ship's mass and force balance give a response time of about 13 s (computed, not measured); the route-scale model uses a time constant of 120 s.
+
+To remake the table (about 25 minutes on a laptop), check the link (about 6 minutes) and redraw the figure:
+
+```bash
+uv run --no-project --python 3.12 --with jax --with numpy python -m stlnav.hullscale
+```
+
+```bash
+uv run --no-project --python 3.12 --with jax --with numpy python checks/two_scales.py data/fields_20261117.npz
+```
+
+```bash
+uv run --no-project --python 3.12 --with jax --with xarray --with 'netCDF4<1.7.5' --with scipy --with matplotlib python -m stlnav.demo_scales
+```
+
+The table records the hull-scale constants it was measured with. If one of them changes, importing `stlnav` warns that the table is out of date and the first check fails.
+
+### In the browser
+
+![The St. Lawrence view of the page](docs/st-lawrence-view.jpg)
+
+*The St. Lawrence view, 5 h 54 into the voyage from Les Escoumins to Sept-Îles: ice in white, the routes of the traffic as thin lines, the other ships as arrowheads, the icebreaker's track in red and its course ahead dashed.*
+
+The page has two views, and the second is the route-scale model.
+
+- **Ice breaking** is the hull-scale simulator. Its readouts include the speed the route-scale model gives for the same ice and throttle, so the fit of the section above can be watched. In one run in 0.6 m of level ice at 80% throttle, the model gave 5.1 m/s and the simulated ship was at 5.3 m/s after 40 s. The browser version of the simulator differs a little from the JAX one the table was measured with (see Status below).
+- **St. Lawrence** is a map of the estuary and Gulf. It shows the ice chart of 15 February 2026 with one assumed thickness (a slider), the routes, and the generated ships; the currents and wind are those of the archived day of 17 November 2026. An icebreaker sails one of four voyages on the Coast Guard's ice route. A click on the water sends it there first. **Break the ice here** opens the ice under the ship in the first view, with the map's thickness and throttle: level ice where the chart shows 90% or more, broken pack between 60 and 90%.
+
+`stlnav-core.js` is a port of `stlnav/ships.py`, `traffic.py` and `env.py`. It copies no number by hand: the fields, routes, ship classes, hull-scale table and settings all come from `stl-data.json` (760 kB, 160 kB compressed), which `stlnav/export_web.py` writes. The fields are reduced for the page: currents every 6 km and wind every 16 km, in 9 frames 3 hours apart, and the day repeats.
+
+`checks/stlnav_js.py` runs the Python model on the page's data and compares the port with it (8 checks, all passing):
+
+| Case | Largest difference between the two |
+|---|---|
+| Speed a ship can hold, 1,200 random cases | 0.000001 m/s |
+| Own ship alone, 10 h under the same actions | 4 m in position |
+| Own ship among 25 ships, 6 h | 4 m in position; 1 m along a ship's route |
+| The three collision rules | 2 m in closest approach |
+| Convoy in 0.35 m of ice | none in the speeds, to 0.01 m/s |
+
+Random departures are switched off in those comparisons, because the two random generators differ. The generator is checked on the mean number of ships at sea: 26.4 simulated against 25.4 expected.
+
+The page steers with a small pilot of its own; the Python package has none, because there the policy is what is to be learned. The pilot follows the route 1.5 km to its right and turns to starboard when another ship will pass within 1.2 km. Over 60 test voyages it arrived 59 times and collided once; without that rule it arrived 36 times.
+
+In one browser run, **Break the ice here** was pressed 3 h into the first voyage, in 90% ice of 0.30 m. The ice-breaking view opened in level ice of that thickness, and over the following 70 s the simulated ship averaged 7.36 m/s; the route-scale model gives 7.29 m/s for that ice.
+
+To rebuild the data file after a change to the routes, the classes or the table, check the port, and look at the page locally (then open http://localhost:8000):
+
+```bash
+uv run --no-project --python 3.12 --with jax --with xarray --with 'netCDF4<1.7.5' --with scipy --with matplotlib python -m stlnav.export_web
+```
+
+```bash
+uv run --no-project --python 3.12 --with jax --with numpy python checks/stlnav_js.py
+```
+
+```bash
+python3 -m http.server 8000
+```
+
+The ice chart is from Fisheries and Oceans Canada (Daily Ocean Variables from Satellite, through the St. Lawrence Global Observatory), under the Open Government Licence - Canada. The currents and wind are from Environment and Climate Change Canada's MSC Datamart.
 
 ## How the ice breaks
 

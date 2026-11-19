@@ -37,7 +37,9 @@ v0 = float(ships.attainable_speed(ib, 1.0, 0.0, 0.0))
 hs = jnp.linspace(0.05, 1.5, 30)
 vh = np.array(ships.attainable_speed(ib, 1.0, hs, 1.0))
 vc = np.array(ships.attainable_speed(ib, 1.0, 0.8, jnp.linspace(0.05, 1.0, 20)))
-report("open water gives the open-water speed", abs(v0 - float(ib.uow)) < 1e-3, f"{v0:.3f} vs {float(ib.uow):.3f} m/s")
+x_ow = (-0.31 + (0.31 ** 2 + 4 * 0.7) ** 0.5) / 1.4        # 0.7 x^2 + (0.3 + 0.01) x = 1: thrust against the two open-water drag terms
+report("open water gives the open-water speed", abs(v0 - x_ow * float(ib.uow)) < 1e-3,
+       f"{v0:.3f} m/s, which is {x_ow:.3f} of the nominal {float(ib.uow):.1f} m/s because of the small linear drag shared with icebreaker_jax.py")
 report("speed falls with thickness and with concentration", (np.diff(vh) <= 1e-6).all() and (np.diff(vc) <= 1e-6).all(), f"1.0 m level ice: {vh[np.argmin(abs(np.array(hs) - 1.0))]:.2f} m/s")
 a, b = ships.lindqvist_terms(ib, 0.6, 0.55e6)
 ref = 0.0
@@ -113,7 +115,7 @@ def encounter(kind, comply):
         lon, lat, th, vo = mx - 2.0 * T / 1e3 / kx, my, 0.0, 2.0
     p = E.params(lon, lat, lon + 3 * np.cos(th), lat + 3 * np.sin(th), cls=0, th=th)
     s = E.State(jnp.float32(lon), jnp.float32(lat), jnp.float32(th), jnp.float32(vo), jnp.float32(0.0), jax.random.key(0), ts)
-    thr = 2.0 * float(jnp.interp(vo, ships.attainable_speed(ib, jnp.linspace(0, 1, 200), 0.0, 0.0), jnp.linspace(0, 1, 200))) - 1.0
+    thr = float(jnp.interp(vo, ships.attainable_speed(ib, jnp.linspace(0, 1, 200), 0.0, 0.0), jnp.linspace(0, 1, 200)))
     step = jax.jit(e2.step)
     closest = np.inf
     for _ in range(60):
@@ -150,7 +152,7 @@ lon, lat = float(f.lon[i]), float(f.lat[j])
 p = E.params(lon, lat, lon + 1.0, lat)
 _, s = env.reset(jax.random.key(0), p, world)
 s = s._replace(v=jnp.float32(0.0))
-_, s1, *_ = env.step(s, jnp.array([-1.0, 0.0]), p, world)
+_, s1, *_ = env.step(s, jnp.array([0.0, 0.0]), p, world)
 drift = np.hypot((float(s1.lon) - lon) * traffic.KY * np.cos(np.deg2rad(lat)), (float(s1.lat) - lat) * traffic.KY) * 1e3 / 60.0
 cur = float(np.hypot(f.data[0, F.UC, j, i], f.data[0, F.VC, j, i]))
 report("a stopped ship drifts at the current's speed", abs(drift - cur) < 0.05 * cur + 0.02, f"{drift:.2f} m/s drift, {cur:.2f} m/s current at {lat:.2f}, {lon:.2f}")

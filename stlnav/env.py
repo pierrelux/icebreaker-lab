@@ -6,14 +6,19 @@ is a point with a heading: its speed through the water relaxes to the speed its 
 local ice and wind at the commanded throttle (ships.py), and the current carries it.
 
 This is a different scale from icebreaker_jax.py, which resolves the hull breaking ice at 0.5 m and
-1/360 s over a few hundred metres. Here ice is a concentration and a thickness on a 2 km grid.
+1/360 s over a few hundred metres. Here ice is a concentration and a thickness on a 2 km grid. The two
+are linked by hullscale.py: the speed the icebreaker (class 0) holds here in level ice is the one the
+hull-scale simulator gives, and any place and time of an episode can be run at hull scale (`zoom`).
 
 Usage
     grid, world = make_world(fields, route_specs, classes, class_names)
     env = StlNav(grid)
     obs, state = env.reset(key, params, world)
-    obs, state, reward, done, info = env.step(state, action, params, world)   # action = [throttle, turn] in [-1, 1]
+    obs, state, reward, done, info = env.step(state, action, params, world)   # action = [throttle, turn]
     # batched: jax.vmap(env.step, in_axes=(0, 0, 0, None))
+
+The throttle means what it means at hull scale: 1 is full ahead and 0 is no thrust. A negative
+throttle counts as 0, because there is no going astern at this scale. The turn command is in [-1, 1].
 
 Positions are longitude and latitude in degrees. Headings are radians from east, counterclockwise.
 """
@@ -173,7 +178,7 @@ class StlNav:
     # ------------------------------------------------------------------ step
     def step(self, s: State, action, p: EnvParams, world: World):
         c, tc = self.cfg, self.cfg.traffic
-        thr, turn = jnp.clip(0.5 * (action[0] + 1.0), 0.0, 1.0), jnp.clip(action[1], -1.0, 1.0)
+        thr, turn = jnp.clip(action[0], 0.0, 1.0), jnp.clip(action[1], -1.0, 1.0)
         key, kt = jax.random.split(s.key)
         samp = lambda lo, la, t: self.sample(world, lo, la, t)
         own = jax.tree.map(lambda a: a[p.cls], world.classes)
@@ -187,10 +192,9 @@ class StlNav:
         back = -(-rx0 * jnp.cos(thd) - ry0 * jnp.sin(thd))                        # distance of the own ship behind each ship
         side = jnp.abs(-rx0 * jnp.sin(thd) + ry0 * jnp.cos(thd))
         in_track = jnp.any(s.traffic.active & (back > 0) & (back < tc.d_channel) & (side < tc.w_channel))
-        channel = jnp.where(in_track, tc.channel, 1.0)
 
         f_wind = ships.wind_force(own, s.v, s.th, here[UW], here[VW])
-        v_goal = ships.attainable_speed(own, thr, here[THICK], here[CONC], p.sigF, f_ext=f_wind, channel=channel)
+        v_goal = ships.attainable_speed(own, thr, here[THICK], here[CONC], p.sigF, f_ext=f_wind, in_track=in_track)
         v = s.v + (v_goal - s.v) * (1.0 - math.exp(-c.dt / c.tau_v))
         th = s.th + turn * own.turn * jnp.clip(v / own.uow, 0.2, 1.0) * c.dt
         ve, vn = v * cs + here[UC], v * sn + here[VC]

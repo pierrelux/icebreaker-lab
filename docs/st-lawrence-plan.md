@@ -165,12 +165,13 @@ Every coefficient taken from memory or a secondary source gets checked against i
 | Part | What it does | Status |
 |---|---|---|
 | `fields.py` | Reads the archive into one grid: CIOPS-East ice and currents, HRDPS wind turned to east/north, RDWPS wave height. Can lay a past winter's chart concentration over it. | Runs on the archived day of 2026-11-17. CIOPS velocity axes assumed east/north, not checked. |
-| `ships.py` | Speed a ship class can hold: thrust against open-water drag, Lindqvist ice resistance scaled by concentration, and wind drag. | Lindqvist matches `icebreaker_jax`. The concentration exponent (2) and the in-track factor (0.4) are placeholders. |
+| `ships.py` | Speed a ship class can hold: thrust against open-water drag, Lindqvist ice resistance scaled by concentration, and wind drag. | Since 2026-11-19 the icebreaker's ice resistance, stalling and in-track factor are fitted to the hull-scale simulator (see the update below). The other classes use Lindqvist's formula. The concentration exponent (2) is still a placeholder. |
+| `hullscale.py` | Runs the hull-scale simulator to make the table `ships.py` reads, and runs it in the ice of any place of a route-scale world (`zoom`). | `checks/two_scales.py`, 10 checks, all passing. |
 | `traffic.py` | Ships leave ports at given rates or on timetables, follow routes, slow in ice, queue and form convoys behind icebreakers, and apply three collision rules to the own ship. | Checked: volumes, the three encounters, escort. Traffic ships do not avoid each other across routes. |
 | `routes.py` | Trunk lane, branches to Sept-Îles, Port-Cartier and Baie-Comeau, four winter ferries, six ship classes. | Sources below. |
 | `env.py` | `reset` and `step` with fields, traffic and a point ship; observation of local fields and the 8 nearest ships. | 12,000 steps/s for 256 environments on a laptop CPU. Not yet run on a GPU. |
 | `checks/stlnav_checks.py` | 12 checks, all passing. | |
-| `demo.py`, `docs/stlnav-demo.png` | Les Escoumins to Sept-Îles on the Coast Guard ice route of 12 February 2026, with the ice chart of 15 February 2026 and an assumed 0.3 m thickness: 11.1 h for the icebreaker, 20.5 h for a Polar Class 7 tanker. | These times are model output, not validated against any observed transit. |
+| `demo.py`, `docs/stlnav-demo.png` | Les Escoumins to Sept-Îles on the Coast Guard ice route of 12 February 2026, with the ice chart of 15 February 2026 and an assumed 0.3 m thickness: 10.9 h for the icebreaker, 20.6 h for a Polar Class 7 tanker (11.1 h and 20.5 h before the link to the hull scale). | These times are model output, not validated against any observed transit. |
 
 **Traffic sources** (read by a research subagent on 2026-11-18; I did not re-read them):
 
@@ -180,15 +181,39 @@ Every coefficient taken from memory or a secondary source gets checked against i
 - Ships: Mia Desgagnés and Blue Puttees from operator sheets; Federal Montreal class and Oceanex Connaigra from trade press. Bow angles are assumed for all of them.
 - Not found anywhere: a published speed for a merchant ship in Gulf ice, escorted or not, and any numeric convoy spacing.
 
-**What this version leaves out:** ice pressure and besetting, ridges, ice drift between frames, wave speed loss, depth and under-keel clearance, the river above Les Escoumins (too narrow for a 2 km grid), forecasts as the ship would have had them (the fields are near-analyses), and the link to the hull-scale simulator (the speed model is a formula, not yet a fit to it).
+**What this version leaves out:** ice pressure and besetting, ridges, ice drift between frames, wave speed loss, depth and under-keel clearance, the river above Les Escoumins (too narrow for a 2 km grid), and forecasts as the ship would have had them (the fields are near-analyses). The link to the hull-scale simulator, missing on 2026-11-18, was made the next day (update below).
 
 ### Next steps
 
 1. Run a winter day from our own archive once ice appears (late December), with CIOPS thickness in place of the assumed one.
-2. Fit the speed model to the hull-scale simulator for level ice, and choose the concentration scaling from model tests.
+2. ~~Fit the speed model to the hull-scale simulator for level ice~~ (done on 2026-11-19 for the icebreaker, see below). Still to do: choose the concentration scaling, from model tests or from floes at hull scale.
 3. Add ice pressure (already archived) and a besetting rule.
 4. Archive the Coast Guard's daily ice routes with the rest, and use each day's route for that day's traffic.
 5. Compare generated lanes and volumes with the DFO monthly density maps.
+
+## Update of 2026-11-19: the two scales are linked
+
+Until now the route-scale environment took the ship's speed in ice from Lindqvist's formula. It now takes it, for the icebreaker, from the hull-scale simulator. `stlnav/hullscale.py` does this in both directions; the README has the figure, the table and the agreement in numbers.
+
+**From hull scale to route scale.** The hull-scale ship was run in level ice at 7 thicknesses (0.2 to 1.2 m) and 8 throttles, 3 runs each, then in runs that search for the throttle at which it stops, and in the channel of another icebreaker: 23 minutes on a laptop. Findings:
+
+- The moving ship meets 75 to 91% of Lindqvist's resistance, less in thin ice. On the demonstration voyage (0.3 m of ice) this shortens the icebreaker's time from 11.1 h to 10.9 h.
+- The hull-scale ship stops at a higher throttle than the formula says, by a factor that grows from 1.1 in 0.2 m of ice to 2.2 in 1.2 m. In 1.0 m it needs more than half throttle to keep moving. The route-scale model now stops the ship at the same throttles.
+- In another icebreaker's channel the resistance is 52% (1.2 m) to 79% (0.2 m) of that in unbroken ice. This replaces the 40% placeholder for every class, so a bulk carrier escorted through 0.35 m of ice now makes 2.7 m/s instead of 4.3 m/s (1.6 m/s alone). For merchant ships, which are wider than the icebreaker's channel, it is still optimistic.
+- Agreement in speed between the two scales: 0.2% on average at the fitted points, 1 to 2% at new points in ice up to 0.5 m, 5 to 9% at new points in ice of 0.7 to 1.1 m. The formula alone is off by 5 to 9% on average in the same cases, and by up to 18%.
+
+**From route scale to hull scale.** `hullscale.zoom` runs the hull-scale simulator in the ice found at a place and time of a route-scale world. This is the hook for local navigation (Phase 5): a route-scale episode supplies the ice, and the hull-scale simulator plays the next few hundred metres.
+
+**In the browser.** The page now has a second view, a map of the estuary and Gulf on which the icebreaker sails a voyage among the generated traffic, with a button that opens the ice under the ship in the ice-breaking view. It runs `stlnav-core.js`, a JavaScript port of the route-scale model that reads everything from one exported data file. The port is checked against the Python model on the same data: positions agree to 4 m after 10 h (README, "In the browser").
+
+**Also changed.** The escort rule of the traffic no longer counts empty slots as ships behind an icebreaker. The ice constants and the icebreaker's particulars are now read from `icebreaker_jax.Config` instead of being copied, so a correction like that of 2026-11-18 is made once. The throttle means the same at both scales (1 is full ahead, 0 is no thrust; the route scale counts a negative throttle as 0).
+
+**Still not linked.**
+
+- Concentration: the hull-scale JAX simulator has no floes. Rigid floes in JAX (Phase 2, item 2) would supply the scaling that is now a placeholder.
+- The merchant hulls: they need a hull-scale model of their own, with bow shapes we do not have.
+- Ridges and thickness that varies inside a 2 km cell.
+- The table has 7 thicknesses. Between them the hull-scale resistance varies by more than a linear interpolation follows, which is the 5 to 9% above. A finer table costs about 3 minutes of laptop time per added thickness.
 
 ## Questions for OGSL
 
