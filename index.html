@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Real-time simulator of a ship breaking sea ice, and a voyage through the ice and traffic of the St. Lawrence that uses it.">
+<meta name="description" content="An icebreaker on a voyage through the ice and traffic of the St. Lawrence: zoom from the whole Gulf down to the hull breaking the ice.">
 <title>Icebreaker Lab</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500&family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -106,57 +106,40 @@
     #tracebox { width: auto; right: calc(max(16px, env(safe-area-inset-right, 0px)) + 44px); }
     #trace { height: 70px; }
   }
+  button.plain[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 </style>
 </head>
 <body>
 <div id="app">
-  <canvas id="view" aria-label="Top-down view of a ship breaking through sea ice"></canvas>
+  <canvas id="view" aria-label="An icebreaker on a voyage through the ice of the St. Lawrence, from the whole Gulf down to the hull breaking the ice"></canvas>
 
   <section class="panel" id="console" aria-label="Readouts">
     <header>
       <h1>Icebreaker Lab</h1>
       <button class="plain" id="toggleControls" aria-expanded="false" aria-controls="controls">Controls</button>
     </header>
-    <div class="seg" role="group" aria-label="View">
-      <button data-vw="hull" aria-pressed="true">Ice breaking</button>
-      <button data-vw="map" aria-pressed="false">St. Lawrence</button>
-    </div>
-    <div class="stack" data-view="hull">
-      <div class="seg" role="group" aria-label="Ice conditions">
-        <button data-sc="level" aria-pressed="true">Level ice</button>
-        <button data-sc="floes" aria-pressed="false">Large floes</button>
-        <button data-sc="pack" aria-pressed="false">Broken pack</button>
-      </div>
-      <dl class="read">
-        <div><dt>Speed</dt><dd id="rSpeed">0.0 m/s</dd></div>
-        <div><dt>St. Lawrence model, same ice</dt><dd id="rModel">loading</dd></div>
-        <div><dt>Ice resistance, 10 s mean</dt><dd id="rIce">0 kN</dd></div>
-        <div class="wide"><dt>Lindqvist formula, same speed</dt><dd id="rLq">0 kN</dd></div>
-        <div><dt>Cusps broken · floes split</dt><dd id="rBreaks">0 · 0</dd></div>
-        <div class="wide"><dt>Ice bodies</dt><dd id="rBodies">0</dd></div>
-        <div class="wide"><dt>Physics cost</dt><dd id="rPhys">0 ms</dd></div>
-      </dl>
-      <p class="note" id="fromMap" hidden></p>
-    </div>
-    <div class="stack" data-view="map" hidden>
-      <dl class="read">
-        <div><dt>Under way</dt><dd id="mTime">0 h 00</dd></div>
-        <div><dt>Speed through the water</dt><dd id="mSpeed">0.0 m/s</dd></div>
-        <div><dt>Ice at the ship</dt><dd id="mIce">open water</dd></div>
-        <div><dt>To destination</dt><dd id="mGoal">0 km</dd></div>
-        <div class="wide"><dt>Nearest ship</dt><dd id="mNear">none</dd></div>
-        <div class="wide"><dt>Ships at sea</dt><dd id="mShips">0</dd></div>
-      </dl>
-      <div class="legend"><span><b style="background:#bd3620"></b>your icebreaker</span><span><b style="background:#0f2530"></b>cargo</span><span><b style="background:#1b6f8c"></b>ferry</span><span><b style="background:#e8a33d"></b>icebreaker</span></div>
-      <p class="note" id="mStatus" hidden></p>
-    </div>
+    <dl class="read">
+      <div><dt>Clock</dt><dd id="rClock">loading</dd></div>
+      <div><dt>Under way</dt><dd id="rTime">0 h 00</dd></div>
+      <div><dt>Speed through the water</dt><dd id="rSpeed">0.0 m/s</dd></div>
+      <div><dt>Ice at the ship</dt><dd id="rHere">open water</dd></div>
+      <div><dt id="rIceLabel">Ice resistance</dt><dd id="rIce">0 kN</dd></div>
+      <div class="wide"><dt>To destination</dt><dd id="rGoal">0 km</dd></div>
+      <div class="wide"><dt>Nearest ship · ships at sea</dt><dd id="rShips">none · 0</dd></div>
+      <div class="wide"><dt>Cusps broken · physics cost</dt><dd id="rBreaks">0 · 0 ms</dd></div>
+    </dl>
+    <div class="legend"><span><b style="background:#bd3620"></b>your icebreaker</span><span><b style="background:#0f2530"></b>cargo</span><span><b style="background:#1b6f8c"></b>ferry</span><span><b style="background:#e8a33d"></b>icebreaker</span></div>
+    <p class="note" id="status" hidden></p>
   </section>
 
   <section class="panel" id="controls" aria-label="Controls">
-    <div class="stack" data-view="hull">
     <div class="field">
-      <div class="top"><label for="h">Ice thickness</label><output id="hOut" for="h">0.60 m</output></div>
-      <input type="range" id="h" min="0.2" max="1.6" step="0.05" value="0.6">
+      <div class="top"><label for="voy">Voyage</label></div>
+      <select id="voy"></select>
+    </div>
+    <div class="field">
+      <div class="top"><label for="h">Ice thickness, assumed</label><output id="hOut" for="h">0.30 m</output></div>
+      <input type="range" id="h" min="0.1" max="1.2" step="0.05" value="0.3">
     </div>
     <div class="field">
       <div class="top"><label for="sf">Flexural strength</label><output id="sfOut" for="sf">0.55 MPa</output></div>
@@ -166,65 +149,34 @@
       <div class="top"><label for="thr">Throttle</label><output id="thrOut" for="thr">100 %</output></div>
       <input type="range" id="thr" min="-100" max="100" step="5" value="100">
     </div>
-    <div class="seg" role="group" aria-label="Simulation speed">
-      <button data-sp="1" aria-pressed="true">1×</button>
-      <button data-sp="2" aria-pressed="false">2×</button>
-      <button data-sp="4" aria-pressed="false">4×</button>
-    </div>
     <div class="row">
       <label class="check"><input type="checkbox" id="loads"> Show loads</label>
       <label class="check"><input type="checkbox" id="cracks" checked> Show cracks</label>
     </div>
-    </div>
-    <div class="stack" data-view="map" hidden>
-      <div class="field">
-        <div class="top"><label for="voy">Voyage</label></div>
-        <select id="voy"></select>
-      </div>
-      <div class="field">
-        <div class="top"><label for="mh">Ice thickness, assumed</label><output id="mhOut" for="mh">0.30 m</output></div>
-        <input type="range" id="mh" min="0.1" max="1.2" step="0.05" value="0.3">
-      </div>
-      <div class="field">
-        <div class="top"><label for="mthr">Throttle</label><output id="mthrOut" for="mthr">100 %</output></div>
-        <input type="range" id="mthr" min="0" max="100" step="5" value="100">
-      </div>
-      <div class="seg" role="group" aria-label="Time that passes in one second">
-        <button data-mr="600" aria-pressed="false">10 min/s</button>
-        <button data-mr="1800" aria-pressed="true">30 min/s</button>
-        <button data-mr="7200" aria-pressed="false">2 h/s</button>
-      </div>
-      <button class="plain" id="breakHere" disabled>Break the ice here</button>
-      <p class="note" id="breakNote"></p>
-    </div>
     <div class="row">
       <button class="plain primary" id="pause">Pause</button>
       <button class="plain" id="restart">Restart</button>
+      <button class="plain" id="follow" aria-pressed="true">Follow ship</button>
     </div>
-    <details data-view="map" hidden>
-      <summary>What this map shows</summary>
-      <p>An icebreaker on a voyage through the estuary and Gulf of St. Lawrence, on a 2 km grid in steps of one minute. It follows a route the Coast Guard recommended in ice and turns away from ships that come too close. Click the water to send it somewhere else first.</p>
+    <details>
+      <summary>What you are looking at</summary>
+      <p>An icebreaker on a voyage through the estuary and Gulf of St. Lawrence. Zoom out and you see the whole voyage; zoom in on the ship and you see its hull breaking the ice. It is one ship and one clock.</p>
+      <p><b>The clock follows the zoom.</b> Breaking ice is computed 360 times per second of the ship's time, which a browser manages at about the speed of a real clock. So close to the ship, time runs at 1 to 4 times real speed and the ice is broken for real. Far out, time runs up to two hours per second, and the ship moves at the speed a model fitted to that same ice-breaking computation gives.</p>
       <p id="aboutIce">The ice is a chart of concentration for one past winter day. The chart gives no thickness, so one thickness is assumed everywhere.</p>
-      <p>The other ships are generated: they leave ports at published yearly rates and on winter ferry timetables, keep to their routes, queue in ice, and give way to you nine times in ten.</p>
-      <p>Your speed is the one at which thrust balances resistance. In ice that resistance is fitted to the ice-breaking simulator of the other view, so the two agree: <b>Break the ice here</b> opens the ice under the ship in that simulator.</p>
+      <p>Close to the ship the ice is made from the chart: level ice where the chart shows 90 % or more, floes covering the chart's share of the water below that. The shapes of the floes are invented; the chart only gives a share per kilometre.</p>
+      <p>The edge of level ice is crushed on the sloping hull, which pushes it down. When the downward force passes the bearing capacity of the ice wedge, <code>P = C_f (θ/π)² σ_f h²</code>, a cusp of radius <code>R = C_l ℓ (1 + C_v v_n)</code> snaps off. A floe splits when the in-plane force passes <code>h K_Ic √L</code>.</p>
+      <p>The other ships are generated: they leave ports at published yearly rates and on winter ferry timetables, keep to their routes, queue in ice, and give way to you nine times in ten. Your ship follows a route the Coast Guard recommended in ice and turns away from ships that come too close. Click the water to send it somewhere else first; A and D steer by hand when you are close.</p>
       <p id="aboutData"></p>
     </details>
-    <details data-view="hull">
-      <summary>How the ice breaks</summary>
-      <p>The hull waterline is checked every half metre against each ice sheet. Where they overlap, the ice edge is crushed at a fixed pressure on the sloping hull face, which pushes the edge down as well as back.</p>
-      <p>When the downward force passes the bearing capacity of the ice wedge, <code>P = C_f (θ/π)² σ_f h²</code>, a cusp of radius <code>R = C_l ℓ (1 + C_v v_n)</code> snaps off and is cut into wedges by radial cracks. ℓ is the characteristic length of a floating plate.</p>
-      <p>A finite floe splits from the contact point when the in-plane force passes <code>h K_Ic √L</code>, with L the distance the crack must run.</p>
-      <p>Broken pieces are rigid bodies. Those pushed under the hull add the submersion term of Lindqvist's resistance formula.</p>
-    </details>
   </section>
 
-  <section class="panel" id="tracebox" aria-label="Ice force history">
-    <h2 id="traceTitle">Ice force along the hull, last 20 s</h2>
+  <section class="panel" id="tracebox" aria-label="History">
+    <h2 id="traceTitle">Speed since departure</h2>
     <canvas id="trace"></canvas>
-    <div class="legend"><span data-view="hull"><span><i></i>simulated</span><span><i class="mean"></i>10 s mean</span><span id="lqLegend"><i class="ref"></i>Lindqvist</span></span><span data-view="map" hidden><span><i></i>speed through the water</span><span><i class="ref"></i>share of ice at the ship</span></span></div>
+    <div class="legend"><span id="legForce" hidden><span><i></i>ice force on the hull</span><span><i class="mean"></i>10 s mean</span><span id="lqLegend"><i class="ref"></i>Lindqvist</span></span><span id="legSpeed"><span><i></i>speed through the water</span><span><i class="ref"></i>share of ice at the ship</span></span></div>
   </section>
 
-  <p id="hint">Click the ice to set a course · A/D steer · W/S throttle · scroll to zoom</p>
+  <p id="hint">Scroll to zoom from the whole Gulf down to the hull · click water to send the ship there · drag to move</p>
   <div id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
 </div>
 
@@ -233,26 +185,36 @@
 <script>
 (() => {
   'use strict';
+  // One view of one ship. The camera lives on the map (kilometres); it zooms from the whole Gulf down to the hull.
+  //   far out: the route-scale model of stlnav-core.js moves the ship, in steps of a minute, hours per second;
+  //   close:   the ice-breaking simulator of icebreaker-core.js moves it, in an endless field of ice made from the chart at the ship's
+  //            place, at about the speed of a clock. Its speed in level ice is what the route-scale model was fitted to.
+  // The switch between the two follows the zoom (see `update`).
   const $ = id => document.getElementById(id);
   const cv = $('view'), ctx = cv.getContext('2d'), tr = $('trace'), tctx = tr.getContext('2d');
-  const TS = 256, vnoise = IceSim.vnoise, hash2 = IceSim.hash2;
+  const TS = 256, vnoise = IceSim.vnoise, hash2 = IceSim.hash2, KY = StlNav.KY, RAD = Math.PI / 180, TAU = 2 * Math.PI, CH = IceSim.CH;
   const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
-  let sim = null, scenario = 'level', seed = 7, speed = 1, W = 1, Hh = 1, dpr = 1, zoom = 1, showLoads = false, showCracks = true;
-  let paused = matchMedia('(prefers-reduced-motion: reduce)').matches, physMs = 0, firstFrame = true, frameNo = 0;
-  const cam = { x: 0, y: 0, s: 4 }, tiles = new WeakMap(), wake = [], keys = Object.create(null);
+  const LAND = 'rgb(86,84,72)', SHIP_COL = { icebreaker: '#e8a33d', ferry: '#1b6f8c', ropax: '#1b6f8c' };
+  const LABELS = { escoumins: 'Les Escoumins', baie_comeau: 'Baie-Comeau', sept_iles: 'Sept-Îles', matane: 'Matane', cabot_strait: 'Cabot Strait', cap_aux_meules: 'Îles de la Madeleine', port_aux_basques: 'Port aux Basques' };
+  let W = 1, Hh = 1, dpr = 1, showLoads = false, showCracks = true, physMs = 0, firstFrame = true, frameNo = 0;
+  let paused = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const cam = { s: 1 };                        // pixels per metre, for the line widths of the close view
+  const tiles = new WeakMap(), wake = [], keys = Object.create(null);
   const TR_N = 600, trace = new Float32Array(TR_N); let trPos = 0, trCount = 0, trClock = 0;
   let col = { sea: '#113a4a', ink: '#0f2530', muted: '#4a626e', line: 'rgba(0,0,0,.2)', accent: '#bd3620', ref: '#1b6f8c' };
+  // The voyage on the map, and the camera: view.x, view.y in kilometres east and south of the grid's north-west corner, view.s in pixels per kilometre.
+  const M = { world: null, error: '', s: null, nav: null, voyage: 0, seed: 1, thr: 1, trail: [], hist: [], histAcc: 0, info: null, status: '', done: false, flash: '', flashUntil: 0,
+    img: null, fine: null, pos: null, prev: null, own0: null, kx: 1, lonW: 0, latN: 0, acc: 0, rate: 1, slow: 1, mode: 'model', byHand: false, stuck: 0,
+    view: { x: 0, y: 0, s: 1 }, follow: true };
+  let sim = null;                              // the ice-breaking simulator around the ship, while the view is close
+  const L0 = { x: 0, y: 0, th0: 0, patches: 0, checked: 0, fade: 0 };   // where the simulator's ship was last seen in its own metres; map heading of its x axis
+  const toX = lon => (lon - M.lonW) * M.kx, toY = lat => (M.latN - lat) * KY;
+  const hm = sec => Math.floor(sec / 3600) + ' h ' + String(Math.floor(sec % 3600 / 60)).padStart(2, '0');
+  const distKm = (lon, lat, q) => Math.hypot((q.lon - lon) * KY * Math.cos(lat * RAD), (q.lat - lat) * KY);
 
   function readTheme() {
     const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim() || null;
     col = { sea: g('--sea') || col.sea, ink: g('--ink') || col.ink, muted: g('--muted') || col.muted, line: g('--line') || col.line, accent: g('--accent') || col.accent, ref: g('--ref') || col.ref };
-  }
-
-  function start() {
-    sim = IceSim.create({ scenario, seed, h: +$('h').value, sigF: +$('sf').value * 1e6 });
-    sim.ship.thr = +$('thr').value / 100;
-    cam.x = sim.ship.x + 50; cam.y = sim.ship.y; wake.length = 0; trace.fill(0); trPos = trCount = 0; trClock = 0; firstFrame = true;
-    $('lqLegend').hidden = scenario !== 'level';
   }
 
   // ---------------------------------------------------------------- ice textures, painted from the distance field in 256-texel tiles
@@ -386,15 +348,9 @@
     ctx.restore();
   }
 
-  function drawOverlays() {
-    const s = sim.ship, H = s.hull, ap = sim.ap;
-    if (ap.on && ap.hasTarget) {
-      ctx.lineWidth = Math.max(0.15, 1.2 / cam.s); ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.setLineDash([2, 2]);
-      ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(ap.tx, ap.ty); ctx.stroke(); ctx.setLineDash([]);
-      ctx.beginPath(); ctx.arc(ap.tx, ap.ty, Math.max(2.2, 7 / cam.s), 0, 6.2832); ctx.stroke();
-    }
-    if (!showLoads) return;
-    const cs = Math.cos(s.th), sn = Math.sin(s.th), ev = sim.events;
+
+  function drawLoads() {   // the ice pressure along the hull, and the cusps of the last second
+    const s = sim.ship, H = s.hull, cs = Math.cos(s.th), sn = Math.sin(s.th), ev = sim.events;
     ctx.lineWidth = Math.max(0.2, 1.5 / cam.s); ctx.strokeStyle = '#ff9a3c'; ctx.beginPath();
     for (let i = 0; i < H.n; i++) { const f = H.f[i]; if (f <= 0) continue; const l = Math.min(14, f / 1.2e5), nx = cs * H.nx[i] - sn * H.ny[i], ny = sn * H.nx[i] + cs * H.ny[i]; ctx.moveTo(H.wx[i], H.wy[i]); ctx.lineTo(H.wx[i] + nx * l, H.wy[i] + ny * l); }
     ctx.stroke();
@@ -404,32 +360,279 @@
     }
   }
 
-  function render(dtReal) {
-    const s = sim.ship; cam.s = clamp(Math.min(W / 300, Hh / 150), 1.3, 7) * zoom;
-    const look = Math.min(W, Hh) / cam.s * 0.2, tx = s.x + Math.cos(s.th) * look, ty = s.y + Math.sin(s.th) * look, k = firstFrame ? 1 : 1 - Math.exp(-dtReal * 2.5);
-    cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = col.sea; ctx.fillRect(0, 0, W, Hh);
-    const sc = cam.s; ctx.setTransform(sc * dpr, 0, 0, sc * dpr, (W / 2 - cam.x * sc) * dpr, (Hh / 2 - cam.y * sc) * dpr);
-    const x0 = cam.x - W / 2 / sc, x1 = cam.x + W / 2 / sc, y0 = cam.y - Hh / 2 / sc, y1 = cam.y + Hh / 2 / sc;
-    if (waterPat) { ctx.fillStyle = waterPat; ctx.fillRect(x0, y0, x1 - x0, y1 - y0); }
-    for (let i = 0; i < wake.length; i++) { const p = wake[i], a = p.age / p.life; ctx.fillStyle = 'rgba(205,234,240,' + (0.2 * (1 - a) * (1 - a)).toFixed(3) + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, 1 + 4.5 * a, 0, 6.2832); ctx.fill(); }
-    drawPieces(true, x0, y0, x1, y1);
-    const budget = { n: firstFrame ? 200 : 2 }, m = 24;
-    for (const S of sim.sheets) { if (S.x + S.R < x0 - m || S.x - S.R > x1 + m || S.y + S.R < y0 - m || S.y - S.R > y1 + m) continue; drawSheet(S, x0 - m, y0 - m, x1 + m, y1 + m, budget); }
-    drawPieces(false, x0, y0, x1, y1);
-    drawShip(); drawOverlays();
-    firstFrame = false;
+  // ---------------------------------------------------------------- the map and the voyage
+  function loadMap(d) {
+    const w = M.world = StlNav.create(d, { thick: +$('h').value, sigF: +$('sf').value * 1e6, wrapTime: true }), g = w.g;
+    M.lonW = g.lon0; M.latN = g.lat0 + g.dlat * (g.ny - 1); M.kx = KY * Math.cos((g.lat0 + g.dlat * (g.ny - 1) / 2) * RAD);
+    M.img = paintIce(w.conc, w.land, g.nx, g.ny, 3, false);                                      // the model's 2 km cells: drawn at once, and kept under the finer picture
+    const pic = d.picture;
+    if (pic) {   // the chart on its own grid of about 1 km, which the page only draws
+      const im = new Image();
+      im.onload = () => {
+        const c = document.createElement('canvas'); c.width = pic.nx; c.height = pic.ny;
+        const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(im, 0, 0);
+        const px = x.getImageData(0, 0, pic.nx, pic.ny).data, n = pic.nx * pic.ny, conc = new Float32Array(n), land = new Uint8Array(n);
+        for (let k = 0; k < n; k++) { const v = px[4 * k]; if (v === 255) land[k] = 1; else conc[k] = v / pic.scale; }
+        M.fine = { canvas: paintIce(conc, land, pic.nx, pic.ny, 2, true), x0: toX(pic.lon0 - pic.dlon / 2), y0: toY(pic.lat0 + pic.dlat / 2), w: pic.nx * pic.dlon * M.kx, h: pic.ny * pic.dlat * KY };
+      };
+      im.src = pic.file;
+    }
+    const sel = $('voy'); sel.textContent = '';
+    w.voyages.forEach((v, i) => { const o = document.createElement('option'); o.value = i; o.textContent = v.name; sel.appendChild(o); });
+    $('aboutIce').textContent = 'The ice is the chart of concentration of ' + d.chart_date + ', drawn on its own grid of about 1 km. The chart gives no thickness, so one thickness is assumed everywhere, and the slider sets it. Currents and wind are those of ' + d.fields_date + ', repeated every day.';
+    $('aboutData').textContent = 'Data. ' + d.about.ice + ' ' + d.about.fields;
+    startVoyage();
   }
 
-  // ---------------------------------------------------------------- force trace
+  // Ice and land as a picture. Every cell is spread over k x k pixels with bilinear weights, so that coasts and ice edges come out as
+  // smooth lines and not as squares. conc and land hold ny rows of nx cells; `north` tells whether the first row is the northern one.
+  function paintIce(conc, land, nx, ny, k, north) {
+    const c2 = Float32Array.from(conc), known = new Uint8Array(nx * ny); for (let q = 0; q < nx * ny; q++) known[q] = land[q] ? 0 : 1;
+    for (let pass = 0; pass < 3; pass++) {   // carry the ice three cells under the land, or the fading coast would show a dark rim of open water
+      const was = Uint8Array.from(known);
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const q = j * nx + i; if (was[q]) continue; let sum = 0, n = 0;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const jj = j + dj, ii = i + di; if (jj < 0 || ii < 0 || jj >= ny || ii >= nx || !was[jj * nx + ii]) continue; sum += c2[jj * nx + ii]; n++; }
+        if (n) { c2[q] = sum / n; known[q] = 1; }
+      }
+    }
+    const blur = src => {   // weights 1-2-1 along rows, then along columns: rounds the steps of the coast and of the ice edges
+      const t = new Float32Array(nx * ny), out = new Float32Array(nx * ny);
+      for (let j = 0; j < ny; j++) for (let i = 0, q = j * nx; i < nx; i++, q++) t[q] = 0.25 * src[i ? q - 1 : q] + 0.5 * src[q] + 0.25 * src[i < nx - 1 ? q + 1 : q];
+      for (let j = 0; j < ny; j++) for (let i = 0, q = j * nx; i < nx; i++, q++) out[q] = 0.25 * t[j ? q - nx : q] + 0.5 * t[q] + 0.25 * t[j < ny - 1 ? q + nx : q];
+      return out;
+    };
+    const lf = blur(land), cf = blur(c2);
+    const W = nx * k, H = ny * k, cvs = document.createElement('canvas'); cvs.width = W; cvs.height = H;
+    const g = cvs.getContext('2d'), img = g.createImageData(W, H), px = img.data, i0s = new Int32Array(W), fxs = new Float32Array(W);
+    for (let X = 0; X < W; X++) { const sx = clamp((X + 0.5) / k - 0.5, 0, nx - 1); i0s[X] = Math.min(sx | 0, nx - 2); fxs[X] = sx - i0s[X]; }
+    for (let Y = 0; Y < H; Y++) {
+      const sy = clamp((Y + 0.5) / k - 0.5, 0, ny - 1), j0 = Math.min(sy | 0, ny - 2), fy = sy - j0, r0 = (north ? j0 : ny - 1 - j0) * nx, r1 = (north ? j0 + 1 : ny - 2 - j0) * nx;
+      for (let X = 0, o = Y * W * 4; X < W; X++, o += 4) {
+        const a0 = r0 + i0s[X], a1 = r1 + i0s[X], fx = fxs[X], w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+        const L = lf[a0] * w00 + lf[a0 + 1] * w10 + lf[a1] * w01 + lf[a1 + 1] * w11, C = cf[a0] * w00 + cf[a0 + 1] * w10 + cf[a1] * w01 + cf[a1 + 1] * w11;
+        let l = (L - 0.42) / 0.16; l = l <= 0 ? 0 : l >= 1 ? 1 : l * l * (3 - 2 * l);              // land fades in across the coast
+        const a = 0.96 * (C > 1 ? 1 : C), A = l + (1 - l) * a; if (A <= 0.002) continue;
+        const rim = 1 - 0.22 * (1 - Math.abs(2 * l - 1));                                         // a slightly darker line along the coast
+        px[o] = (l * 86 * rim + (1 - l) * a * 236) / A; px[o + 1] = (l * 84 * rim + (1 - l) * a * 243) / A; px[o + 2] = (l * 72 * rim + (1 - l) * a * 246) / A; px[o + 3] = 255 * A;
+      }
+    }
+    g.putImageData(img, 0, 0); return cvs;
+  }
+
+
+  function snapshot() {   // where every ship of the traffic is, now and one step ago, so that they can be drawn in between
+    const ts = M.s.traffic, n = ts.n, mk = () => ({ lon: new Float64Array(n), lat: new Float64Array(n), hd: new Float64Array(n), on: new Uint8Array(n) });
+    const p = M.pos || (M.pos = mk()), q = M.prev || (M.prev = mk());
+    q.lon.set(p.lon); q.lat.set(p.lat); q.hd.set(p.hd); q.on.set(p.on);
+    for (let i = 0; i < n; i++) { const r = StlNav.place(M.world, ts.route[i], ts.s[i], ts.off[i]); p.lon[i] = r[0]; p.lat[i] = r[1]; p.hd[i] = r[2]; p.on[i] = ts.active[i]; }
+  }
+
+  function startVoyage() {
+    const w = M.world, nav = M.nav = StlNav.voyage(w, M.voyage), p = nav.path, e = p[p.length - 1];
+    const th = Math.atan2((p[1].lat - p[0].lat) * KY, (p[1].lon - p[0].lon) * KY * Math.cos(p[0].lat * RAD));
+    sim = null; M.mode = 'model'; M.trail = []; M.hist = []; M.histAcc = 0; M.done = false; M.status = ''; M.acc = 0; M.info = null; M.pos = M.prev = null; M.byHand = false; M.stuck = 0;
+    M.s = StlNav.reset(w, { lon: p[0].lon, lat: p[0].lat, th, goalLon: e.lon, goalLat: e.lat, cls: 0, seed: M.seed });
+    M.own0 = { lon: M.s.lon, lat: M.s.lat, th: M.s.th }; snapshot(); snapshot();
+    let far = 1; for (const q of p) far = Math.max(far, Math.abs(toX(q.lon) - toX(p[0].lon)) / Math.max(40, W / 2 - (W > 720 ? 330 : 30)), Math.abs(toY(q.lat) - toY(p[0].lat)) / Math.max(40, Hh / 2 - (W > 720 ? 60 : 190)));
+    M.view.s = clamp(0.9 / far, 0.25, 30); M.view.x = toX(M.s.lon); M.view.y = toY(M.s.lat); setFollow(true); readouts();
+  }
+
+  // ---------------------------------------------------------------- the two engines
+  const SMP = {}, HERE = {};
+  function chartAt(x, y) {   // the chart at a point of the ice-breaking simulator's own frame (metres), for the ice it makes around the ship
+    const s = M.s, dx = x - L0.x, dy = y - L0.y, c = Math.cos(L0.th0), sn = Math.sin(L0.th0);
+    StlNav.sample(M.world, s.lon + (dx * c + dy * sn) / (1000 * KY * Math.cos(s.lat * RAD)), s.lat + (dx * sn - dy * c) / (1000 * KY), s.t, SMP);
+    return { conc: SMP.conc, h: SMP.thick };
+  }
+  function enterPhysics() {   // the view is close: from here the ice-breaking simulator moves the ship
+    const s = M.s, w = M.world; StlNav.sample(w, s.lon, s.lat, s.t, HERE);
+    L0.x = 0; L0.y = 0; L0.th0 = s.th; L0.checked = 0; L0.fade = 0;
+    sim = IceSim.create({ scenario: 'field', seed: M.seed * 131 + (L0.patches++), h: Math.max(HERE.thick, 0.05), sigF: w.sigF, u0: s.v, field: { at: chartAt } });
+    sim.ship.thr = M.thr; M.mode = 'physics'; M.stuck = 0; M.acc = 0; wake.length = 0; trace.fill(0); trPos = trCount = 0; trClock = 0; firstFrame = true; setTrace();
+  }
+  function leavePhysics() { sim = null; M.mode = 'model'; M.acc = 0; M.own0 = { lon: M.s.lon, lat: M.s.lat, th: M.s.th }; M.byHand = false; setTrace(); }
+  function finish(info, el) {
+    if (info.arrived) { M.done = true; M.status = 'Arrived after ' + el + '.'; }
+    else if (info.collision) { M.done = true; M.status = 'Collision with another ship after ' + el + '. Restart to sail again.'; }
+    else if (info.aground) { M.done = true; M.status = 'Aground after ' + el + '. Restart to sail again.'; }
+    return M.done;
+  }
+  function record(speed, conc, dt) {   // the trail on the map, and the history of speed (one point per minute of ship time)
+    const s = M.s, x = toX(s.lon), y = toY(s.lat), t = M.trail, n = t.length;
+    if (n < 2 || Math.hypot(x - t[n - 2], y - t[n - 1]) > (M.mode === 'physics' ? 0.04 : 1.2)) t.push(x, y);
+    M.histAcc += dt; if (M.histAcc < 60) return; M.histAcc = 0; M.hist.push(speed, conc);
+    if (M.hist.length > 8000) M.hist = M.hist.filter((v, i) => i % 4 < 2);
+  }
+
+  function stepModel(dtReal) {
+    const w = M.world, dt = w.cfg.dt; M.acc += dtReal * M.rate;
+    for (let n = 0; M.acc >= dt && n < 200 && !M.done; n++) {
+      const s = M.s; M.acc -= dt; M.own0 = { lon: s.lon, lat: s.lat, th: s.th };
+      const info = M.info = StlNav.step(w, s, StlNav.pilot(w, s, M.nav, Math.max(M.thr, 0))); snapshot();
+      record(info.speed, info.conc > 0.01 && info.thick > 0.01 ? info.conc : 0, dt);
+      if (!finish(info, hm(s.t - s.t0))) M.status = info.vGoal === 0 && M.thr > 0 && info.conc > 0.01 ? 'Stopped by the ice. Open the throttle, or send the ship around.' : M.nav.avoiding ? 'Keeping clear of another ship.' : '';
+    }
+    if (M.done) M.acc = 0;
+  }
+
+  function stepPhysics(dtReal) {
+    const w = M.world, s = M.s, sh = sim.ship, t0 = performance.now();
+    if (keys.a || keys.arrowleft || keys.d || keys.arrowright) { M.byHand = true; sim.ap.on = false; sh.rudCmd = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0); }
+    else if (M.byHand) sh.rudCmd = 0;
+    if (M.byHand) sh.thr = M.thr;
+    else {   // the route's pilot says where to head; the simulator's autopilot holds that heading with the rudder
+      const a = StlNav.pilot(w, s, M.nav, Math.max(M.thr, 0)), ap = sim.ap, tg = M.nav.tgt; ap.on = true; ap.hasTarget = false; sh.thr = M.thr < 0 ? M.thr : a[0];
+      if (M.nav.avoiding) ap.heading = sh.th + (a[1] < 0 ? 0.8 : a[1] > 0 ? -0.4 : 0);
+      else ap.heading = L0.th0 - Math.atan2((tg.lat - s.lat) * KY, (tg.lon - s.lon) * KY * Math.cos(s.lat * RAD));
+    }
+    sim.accX = 0; sim.accN = 0;
+    const k = IceSim.advance(sim, dtReal * M.rate), dt = k * sim.dt; IceSim.follow(sim);
+    physMs += (performance.now() - t0 - physMs) * 0.08;
+    M.slow = physMs > 13 ? Math.max(0.25, M.slow * 0.98) : physMs < 8 ? Math.min(1, M.slow * 1.01) : M.slow;      // a slow machine gets a slower clock, not a stutter
+    if (!k) return;
+    trClock += dt; if (trClock >= 1 / 30) { trace[trPos] = -sim.accX / sim.accN; trPos = (trPos + 1) % TR_N; if (trCount < TR_N) trCount++; trClock = 0; }
+    if (Math.abs(sh.u) > 0.4 && sh.thr > 0.05) for (let q = 0; q < 2; q++) { const c = Math.cos(sh.th), sn = Math.sin(sh.th), by = (q ? 3.2 : -3.2) + (Math.random() - 0.5) * 2, bx = -sh.L / 2 - 1; wake.push({ x: sh.x + c * bx - sn * by, y: sh.y + sn * bx + c * by, vx: -c * 1.5 * sh.thr, vy: -sn * 1.5 * sh.thr, age: 0, life: 5 + 3 * Math.random() }); }
+    let nw = 0; for (let i = 0; i < wake.length; i++) { const p = wake[i]; p.age += dt; if (p.age >= p.life) continue; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.97; p.vy *= 0.97; wake[nw++] = p; } wake.length = nw;
+    // where that puts the ship on the map: its own motion in the simulator's frame, plus the drift of the water
+    const dx = sh.x - L0.x, dy = sh.y - L0.y, c = Math.cos(L0.th0), sn = Math.sin(L0.th0); L0.x = sh.x; L0.y = sh.y; L0.fade = Math.min(1, L0.fade + dtReal * 2.5);
+    StlNav.sample(w, s.lon, s.lat, s.t, HERE);
+    const east = dx * c + dy * sn + HERE.uc * dt, north = dx * sn - dy * c + HERE.vc * dt;
+    s.lon += east / (1000 * KY * Math.cos(s.lat * RAD)); s.lat += north / (1000 * KY); s.th = L0.th0 - sh.th; s.v = sh.u;
+    const info = M.info = StlNav.follow(w, s, dt, east / dt, north / dt), ice = HERE.conc > 0.01 && HERE.thick > 0.01; snapshot();
+    info.conc = HERE.conc; info.thick = HERE.thick; record(sh.u, ice ? HERE.conc : 0, dt);
+    if (sim.t - L0.checked > 1.5) {   // the thickness under the ship as the chart has it
+      L0.checked = sim.t; const h = Math.max(HERE.thick, 0.05); if (Math.abs(h - sim.P.h) > 0.01) { sim.P.h = h; sim.Rs0 = IceSim.lindqvist(sim, h, 0).Rs; }
+    }
+    M.stuck = Math.abs(sh.u) < 0.08 && sh.thr > 0.05 ? M.stuck + dt : 0;
+    if (!finish(info, hm(s.t - s.t0))) M.status = M.stuck > 6 ? 'Stopped by the ice. Back off with a throttle below zero and ram, or send the ship around.' : M.byHand ? 'Steering by hand. Click the water to hand the helm back.' : M.nav.avoiding ? 'Keeping clear of another ship.' : '';
+  }
+
+  function update(dtReal) {
+    if (!M.world) return;
+    if (keys.w || keys.arrowup) M.thr = clamp(M.thr + 0.7 * dtReal, -1, 1);
+    if (keys.s || keys.arrowdown) M.thr = clamp(M.thr - 0.7 * dtReal, -1, 1);
+    const mpp = 1000 / M.view.s;                 // metres per pixel
+    // Close to the ship the ice is broken for real, at about the speed of a clock. Far out the fitted model sails the ship, fast.
+    if (M.mode === 'model' && mpp < 6 && !M.done) enterPhysics(); else if (M.mode === 'physics' && (mpp > 8 || M.done)) leavePhysics();
+    M.rate = M.mode === 'physics' ? clamp(0.7 * mpp, 1, 4) * M.slow : clamp(2.2 * mpp, 30, 7200);
+    if (paused || M.done) return;
+    if (M.mode === 'physics') stepPhysics(dtReal); else stepModel(dtReal);
+  }
+
+  // ---------------------------------------------------------------- drawing
+  function glyph(x, y, hd, len, fill) {   // a ship as an arrowhead; hd is the heading in radians from east, and north is up
+    const c = Math.cos(hd), s = -Math.sin(hd), wd = len * 0.34;
+    ctx.beginPath(); ctx.moveTo(x + c * len * 0.6, y + s * len * 0.6); ctx.lineTo(x - c * len * 0.4 - s * wd, y - s * len * 0.4 + c * wd); ctx.lineTo(x - c * len * 0.4 + s * wd, y - s * len * 0.4 - c * wd); ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.stroke();
+  }
+
+
+  function hullGlyph(x, y, hd, L, B, k, fill) {   // a ship at its true size, as a plain hull; hd in radians from east, north up
+    const c = Math.cos(hd), s = -Math.sin(hd), P = [[0.5, 0], [0.2, 0.5], [-0.5, 0.42], [-0.5, -0.42], [0.2, -0.5]];
+    ctx.beginPath(); for (let i = 0; i < P.length; i++) { const u = P[i][0] * L * k, v = P[i][1] * B * k, X = x + c * u - s * v, Y = y + s * u + c * v; if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y); } ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.stroke();
+  }
+
+  function draw() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalAlpha = 1; ctx.fillStyle = M.world ? LAND : col.sea; ctx.fillRect(0, 0, W, Hh);                 // outside the grid counts as land
+    ctx.font = '500 13.5px "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif'; ctx.textBaseline = 'middle';
+    if (!M.world) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.textAlign = 'center'; ctx.fillText(M.error || 'Loading the St. Lawrence', W / 2, Hh / 2); return; }
+    const w = M.world, g = w.g, rt = w.routes, s = M.s, o = M.own0, v = M.view, a = M.mode === 'physics' || M.done ? 1 : clamp(M.acc / w.cfg.dt, 0, 1);
+    const lon = o.lon + (s.lon - o.lon) * a, lat = o.lat + (s.lat - o.lat) * a, hd = o.th + (s.th - o.th) * a, mx = toX(lon), my = toY(lat);
+    if (M.follow) { v.x = mx; v.y = my; }
+    const X = x => (x - v.x) * v.s + W / 2, Y = y => (y - v.y) * v.s + Hh / 2, k = v.s / 1000, mpp = 1 / k, sx = X(mx), sy = Y(my);   // k: pixels per metre
+    const far = clamp((mpp - 12) / 28, 0, 1);                                                    // 1 where the view is a map, 0 where it is a close view
+    // the chart: sea, ice by concentration, land
+    const ix = X(-0.5 * g.dlon * M.kx), iy = Y(-0.5 * g.dlat * KY), iw = g.nx * g.dlon * M.kx * v.s, ih = g.ny * g.dlat * KY * v.s;
+    ctx.fillStyle = col.sea; ctx.fillRect(ix, iy, iw, ih); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(M.img, ix, iy, iw, ih);
+    if (M.fine) { const f = M.fine; ctx.fillRect(X(f.x0), Y(f.y0), f.w * v.s, f.h * v.s); ctx.drawImage(f.canvas, X(f.x0), Y(f.y0), f.w * v.s, f.h * v.s); }
+    // the routes of the traffic
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(20,60,80,' + (0.12 + 0.23 * far).toFixed(2) + ')'; ctx.beginPath();
+    for (let r = 0; r < w.R; r++) {
+      if (rt.name[r].endsWith('(return)')) continue;
+      for (let q = 0; q < rt.lon[r].length; q++) { if (q && rt.lon[r][q] === rt.lon[r][q - 1] && rt.lat[r][q] === rt.lat[r][q - 1]) break; const x = X(toX(rt.lon[r][q])), y = Y(toY(rt.lat[r][q])); if (q) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+    }
+    ctx.stroke();
+    // the way come: a red line on the map, the channel left in the ice when seen from closer
+    if (M.trail.length > 3) {
+      ctx.beginPath(); ctx.moveTo(X(M.trail[0]), Y(M.trail[1])); for (let i = 2; i < M.trail.length; i += 2) ctx.lineTo(X(M.trail[i]), Y(M.trail[i + 1])); ctx.lineTo(sx, sy); ctx.lineJoin = 'round';
+      if (far < 1) { ctx.globalAlpha = 0.8 * (1 - far); ctx.lineWidth = Math.max(2, 21 * k); ctx.strokeStyle = col.sea; ctx.stroke(); }
+      ctx.globalAlpha = Math.max(far, 0.25); ctx.lineWidth = 2; ctx.strokeStyle = col.accent; ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    if (!M.done && !M.byHand) {                                                                    // the course ahead
+      const nav = M.nav; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.beginPath(); ctx.moveTo(sx, sy);
+      if (nav.manual) ctx.lineTo(X(toX(nav.manual.lon)), Y(toY(nav.manual.lat)));
+      for (let q = nav.k; q < nav.path.length; q++) ctx.lineTo(X(toX(nav.path[q].lon)), Y(toY(nav.path[q].lat)));
+      ctx.stroke(); ctx.setLineDash([]);
+      if (nav.manual) { ctx.beginPath(); ctx.arc(X(toX(nav.manual.lon)), Y(toY(nav.manual.lat)), 6, 0, TAU); ctx.stroke(); }
+    }
+    // close to the ship: the ice as the simulator has it, the broken pieces, the ship itself
+    if (sim) {
+      const sh = sim.ship, c = Math.cos(L0.th0), sn = Math.sin(L0.th0), al = L0.fade; cam.s = k;
+      // the simulator's frame on the screen: its x axis points along the map heading th0, and its ship sits where the map has the ship
+      ctx.setTransform(k * c * dpr, -k * sn * dpr, k * sn * dpr, k * c * dpr, (sx - k * (c * sh.x + sn * sh.y)) * dpr, (sy - k * (-sn * sh.x + c * sh.y)) * dpr);
+      let x0 = 1e18, y0 = 1e18, x1 = -1e18, y1 = -1e18;                                           // the part of that frame the window shows
+      for (let q = 0; q < 4; q++) { const ex = ((q & 1 ? W : 0) - sx) / k, ey = ((q & 2 ? Hh : 0) - sy) / k, lx = sh.x + c * ex - sn * ey, ly = sh.y + sn * ex + c * ey; x0 = Math.min(x0, lx); x1 = Math.max(x1, lx); y0 = Math.min(y0, ly); y1 = Math.max(y1, ly); }
+      ctx.globalAlpha = al;
+      for (const key of sim.field.chunks) {                                                       // water under every piece of the field that has been made
+        const q = key.split(','), cx = +q[0] * CH, cy = +q[1] * CH; if (cx > x1 || cx + CH < x0 || cy > y1 || cy + CH < y0) continue;
+        const dx = cx + CH / 2 - sh.x, dy = cy + CH / 2 - sh.y;
+        if (StlNav.landAt(w, s.lon + (dx * c + dy * sn) / (1000 * KY * Math.cos(s.lat * RAD)), s.lat + (dx * sn - dy * c) / (1000 * KY)) > 0.5) continue;
+        ctx.fillStyle = col.sea; ctx.fillRect(cx, cy, CH, CH); if (waterPat) { ctx.fillStyle = waterPat; ctx.fillRect(cx, cy, CH, CH); }
+      }
+      for (let i = 0; i < wake.length; i++) { const p = wake[i], t = p.age / p.life; ctx.fillStyle = 'rgba(205,234,240,' + (0.2 * (1 - t) * (1 - t)).toFixed(3) + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, 1 + 4.5 * t, 0, 6.2832); ctx.fill(); }
+      drawPieces(true, x0, y0, x1, y1);
+      const budget = { n: firstFrame ? 40 : 10 }, m = 24;                                           // new ice textures per frame, nearest first
+      for (const S of sim.sheets) { if (S.x + S.R < x0 - m || S.x - S.R > x1 + m || S.y + S.R < y0 - m || S.y - S.R > y1 + m) continue; drawSheet(S, x0 - m, y0 - m, x1 + m, y1 + m, budget); }
+      drawPieces(false, x0, y0, x1, y1);
+      // The field ends some way from the ship, where the chart's flat colour takes over. Fade into that colour instead of showing the edge.
+      const here = M.info && M.info.conc !== undefined ? M.info : chartAt(sh.x, sh.y), ai = 0.96 * Math.min(1, here.conc), sea = seaRGB(), R1 = here.conc >= 0.895 ? 400 : 235;
+      const tint = [0, 1, 2].map(q => Math.round([236, 243, 246][q] * ai + sea[q] * (1 - ai))).join(','), gr = ctx.createRadialGradient(sh.x, sh.y, 0.5 * R1, sh.x, sh.y, R1);
+      gr.addColorStop(0, 'rgba(' + tint + ',0)'); gr.addColorStop(1, 'rgba(' + tint + ',1)');
+      ctx.globalAlpha = al; ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(sh.x, sh.y, 3 * R1, 0, TAU); ctx.arc(sh.x, sh.y, 0.5 * R1, 0, TAU, true); ctx.fill();
+      ctx.globalAlpha = al; drawShip(); if (showLoads) drawLoads();
+      firstFrame = false; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalAlpha = 1;
+    }
+    // the other ships, and the own ship when the simulator is not drawing it
+    const ts = s.traffic, p = M.pos, q = M.prev, len = clamp(5 + v.s * 2.2, 7, 13);
+    for (let i = 0; i < ts.n; i++) {
+      if (!p.on[i]) continue;
+      const jump = !q.on[i] || Math.abs(p.lon[i] - q.lon[i]) + Math.abs(p.lat[i] - q.lat[i]) > 0.05, b = jump ? 1 : a, cl = w.classes[ts.cls[i]];   // a slot that has just been given a new ship is not drawn in between
+      const x = X(toX(q.lon[i] + (p.lon[i] - q.lon[i]) * b)), y = Y(toY(q.lat[i] + (p.lat[i] - q.lat[i]) * b)); if (x < -200 || y < -200 || x > W + 200 || y > Hh + 200) continue;
+      if (cl.L * k > 12) hullGlyph(x, y, p.hd[i], cl.L, cl.B, k, SHIP_COL[cl.name] || '#0f2530'); else glyph(x, y, p.hd[i], len, SHIP_COL[cl.name] || '#0f2530');
+    }
+    if (!sim) { const cl = w.classes[s.cls]; if (cl.L * k > 12) hullGlyph(sx, sy, hd, cl.L, cl.B, k, '#bd3620'); else glyph(sx, sy, hd, len * 1.5, '#bd3620'); }
+    if (far > 0) {                                                                                // place names, written towards the middle of the window
+      ctx.lineJoin = 'round'; ctx.globalAlpha = far;
+      for (const name in LABELS) {
+        const px = X(toX(w.places[name][1])), py = Y(toY(w.places[name][0])), lf = px > W * 0.6; ctx.textAlign = lf ? 'right' : 'left';
+        ctx.fillStyle = '#f2f6f7'; ctx.beginPath(); ctx.arc(px, py, 2.2, 0, TAU); ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(8,30,40,0.75)'; ctx.strokeText(LABELS[name], px + (lf ? -8 : 8), py - 9); ctx.fillText(LABELS[name], px + (lf ? -8 : 8), py - 9);
+      }
+      ctx.globalAlpha = 1;
+    }
+    const bar = [10, 20, 50, 100, 200, 500, 1e3, 2e3, 5e3, 1e4, 2e4, 5e4, 1e5, 2e5, 5e5].find(q => q * k >= 70) || 5e5, bw = bar * k, bx = W / 2 - bw / 2, by = Hh - (W > 980 ? 62 : 150);   // scale bar
+    const txt = bar >= 1000 ? bar / 1000 + ' km' : bar + ' m';
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.moveTo(bx, by - 4); ctx.lineTo(bx, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by - 4); ctx.stroke();
+    ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(8,30,40,0.75)'; ctx.strokeText(txt, bx + bw / 2, by - 11); ctx.fillStyle = '#f2f6f7'; ctx.fillText(txt, bx + bw / 2, by - 11);
+  }
+
+  // ---------------------------------------------------------------- the small plot, and the readouts
   function niceCeil(v) { const e = Math.pow(10, Math.floor(Math.log10(v))), f = v / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * e; }
   function fmtF(n) { const a = Math.abs(n); return a >= 1e6 ? (n / 1e6).toFixed(2) + ' MN' : Math.round(n / 1e3) + ' kN'; }
   function meanForce(nLast) { const n = Math.min(nLast, trCount); if (!n) return 0; let sum = 0; for (let i = 0; i < n; i++) sum += trace[(trPos - 1 - i + TR_N) % TR_N]; return sum / n; }
-  function drawTrace() {
-    const w = tr.clientWidth, h = tr.clientHeight; if (!w || !h) return;
-    if (tr.width !== Math.round(w * dpr) || tr.height !== Math.round(h * dpr)) { tr.width = Math.round(w * dpr); tr.height = Math.round(h * dpr); }
-    const g = tctx; g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
-    const padL = 52, padB = 4, padT = 6, pw = w - padL - 2, ph = h - padT - padB, lq = scenario === 'level' ? IceSim.lindqvist(sim, sim.P.h, Math.max(sim.ship.u, 0)).total : 0;
+
+  let seaCache = ['', [17, 58, 74]];
+  function seaRGB() {   // the sea colour of the theme as three numbers
+    if (seaCache[0] !== col.sea) { const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(col.sea.trim()); seaCache = [col.sea, m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [17, 58, 74]]; }
+    return seaCache[1];
+  }
+  const levelHere = () => !!M.info && M.info.conc >= 0.895 && M.info.thick > 0.02;
+  function sizeTrace() { const w = tr.clientWidth, h = tr.clientHeight; if (!w || !h) return null; if (tr.width !== Math.round(w * dpr) || tr.height !== Math.round(h * dpr)) { tr.width = Math.round(w * dpr); tr.height = Math.round(h * dpr); } tctx.setTransform(dpr, 0, 0, dpr, 0, 0); tctx.clearRect(0, 0, w, h); return [w, h]; }
+  function drawForce() {   // close view: the ice force along the hull over the last 20 s
+    const wh = sizeTrace(); if (!wh) return; const w = wh[0], h = wh[1], g = tctx;
+    const padL = 52, padB = 4, padT = 6, pw = w - padL - 2, ph = h - padT - padB, lq = levelHere() ? IceSim.lindqvist(sim, sim.P.h, Math.max(sim.ship.u, 0)).total : 0;
     const srt = Float32Array.from(trace.subarray(0, Math.max(1, trCount))).sort(), p96 = srt[Math.floor(0.96 * (srt.length - 1))];
     const top = niceCeil(Math.max(2e5, p96 * 1.15, lq * 1.1)), Y = v => padT + ph * (1 - clamp(v / top, -0.05, 1)), ax = v => (v >= 1e6 ? +(v / 1e6).toFixed(2) + ' MN' : Math.round(v / 1e3) + ' kN');
     g.font = '10.5px "IBM Plex Mono", ui-monospace, Menlo, monospace'; g.textAlign = 'right'; g.textBaseline = 'middle'; g.lineWidth = 1;
@@ -442,144 +645,8 @@
     const mean = meanForce(300); g.setLineDash([5, 4]); g.strokeStyle = col.ink; g.lineWidth = 1.2; g.beginPath(); g.moveTo(padL, Y(mean)); g.lineTo(w - 2, Y(mean)); g.stroke(); g.setLineDash([]);
     if (lq > 0) { g.strokeStyle = col.ref; g.lineWidth = 1.6; g.beginPath(); g.moveTo(padL, Y(lq)); g.lineTo(w - 2, Y(lq)); g.stroke(); }
   }
-
-  function readouts() {
-    const s = sim.ship, v = Math.hypot(s.u, s.v), ns = sim.sheets.length;
-    $('rSpeed').textContent = v.toFixed(1) + ' m/s · ' + (v * 1.944).toFixed(1) + ' kn';
-    $('rIce').textContent = fmtF(meanForce(300));
-    const mdl = $('rModel');                                     // what the route-scale model of the other view gives for this ice
-    if (!M.world) mdl.textContent = M.error ? 'not loaded' : 'loading';
-    else if (s.thr < 0) mdl.textContent = 'ahead only';
-    else if (scenario === 'level' || fromMap) {
-      const conc = scenario === 'level' ? 1 : fromMap.conc, vm = StlNav.attainableSpeed(M.world, M.world.classes[0], s.thr, sim.P.h, conc, sim.P.sigF, 0, false);
-      mdl.textContent = (vm > 0 ? vm.toFixed(1) + ' m/s' : 'stopped') + (conc < 1 ? ' at ' + Math.round(conc * 100) + ' % ice' : '');
-    } else mdl.textContent = 'level ice only';
-    $('rLq').textContent = scenario === 'level' ? fmtF(IceSim.lindqvist(sim, sim.P.h, Math.max(s.u, 0)).total) : 'level ice only';
-    $('rBreaks').textContent = sim.stats.cusps + ' · ' + sim.stats.splits;
-    $('rBodies').textContent = sim.pieces.length + ' pieces · ' + ns + (ns === 1 ? ' sheet' : ' sheets');
-    $('rPhys').textContent = physMs.toFixed(1) + ' ms per frame';
-    const t = Math.round(s.thr * 100); if (+$('thr').value !== t) { $('thr').value = t; $('thrOut').textContent = t + ' %'; }
-  }
-
-  // ---------------------------------------------------------------- St. Lawrence view: the route-scale model of stlnav-core.js
-  const KY = StlNav.KY, RAD = Math.PI / 180, TAU = 2 * Math.PI, SHIP_COL = { icebreaker: '#e8a33d', ferry: '#1b6f8c', ropax: '#1b6f8c' };
-  const LABELS = { escoumins: 'Les Escoumins', baie_comeau: 'Baie-Comeau', sept_iles: 'Sept-Îles', matane: 'Matane', cabot_strait: 'Cabot Strait', cap_aux_meules: 'Îles de la Madeleine', port_aux_basques: 'Port aux Basques' };
-  const LAND = 'rgb(86,84,72)';
-  let view = 'hull', fromMap = null;
-  const M = { world: null, error: '', s: null, paused: paused, rate: 1800, acc: 0, thr: 1, voyage: 0, nav: null, trail: [], hist: [], info: null, status: '', done: false,
-    img: null, cam: { x: 0, y: 0, s: 1 }, flash: '', flashUntil: 0, pos: null, prev: null, own0: null, seed: 1, kx: 1, lonW: 0, latN: 0 };
-  const toX = lon => (lon - M.lonW) * M.kx, toY = lat => (M.latN - lat) * KY;                    // kilometres east and south of the grid's north-west corner
-  const hm = sec => Math.floor(sec / 3600) + ' h ' + String(Math.floor(sec % 3600 / 60)).padStart(2, '0');
-  const distKm = (lon, lat, q) => Math.hypot((q.lon - lon) * KY * Math.cos(lat * RAD), (q.lat - lat) * KY);
-
-  function loadMap(d) {
-    const w = M.world = StlNav.create(d, { thick: +$('mh').value, wrapTime: true }), g = w.g;
-    M.lonW = g.lon0; M.latN = g.lat0 + g.dlat * (g.ny - 1); M.kx = KY * Math.cos((g.lat0 + g.dlat * (g.ny - 1) / 2) * RAD);
-    const c = document.createElement('canvas'); c.width = g.nx; c.height = g.ny;                 // one pixel per 2 km cell, north up: land, and ice by concentration
-    const x = c.getContext('2d'), img = x.createImageData(g.nx, g.ny), px = img.data;
-    for (let j = 0; j < g.ny; j++) for (let i = 0; i < g.nx; i++) {
-      const k = j * g.nx + i, o = ((g.ny - 1 - j) * g.nx + i) * 4;
-      if (w.land[k]) { px[o] = 86; px[o + 1] = 84; px[o + 2] = 72; px[o + 3] = 255; }
-      else { px[o] = 236; px[o + 1] = 243; px[o + 2] = 246; px[o + 3] = Math.round(245 * Math.min(1, w.conc[k])); }
-    }
-    x.putImageData(img, 0, 0); M.img = c;
-    const sel = $('voy'); sel.textContent = '';
-    w.voyages.forEach((v, i) => { const o = document.createElement('option'); o.value = i; o.textContent = v.name; sel.appendChild(o); });
-    $('aboutIce').textContent = 'The ice is the chart of concentration of ' + d.chart_date + '. The chart gives no thickness, so one thickness is assumed everywhere, and the slider sets it. Currents and wind are those of ' + d.fields_date + ', repeated every day.';
-    $('aboutData').textContent = 'Data. ' + d.about.ice + ' ' + d.about.fields;
-    startVoyage();
-  }
-
-  function snapshot() {   // where every ship of the traffic is, now and one step ago, so that they can be drawn in between
-    const ts = M.s.traffic, n = ts.n, mk = () => ({ lon: new Float64Array(n), lat: new Float64Array(n), hd: new Float64Array(n), on: new Uint8Array(n) });
-    const p = M.pos || (M.pos = mk()), q = M.prev || (M.prev = mk());
-    q.lon.set(p.lon); q.lat.set(p.lat); q.hd.set(p.hd); q.on.set(p.on);
-    for (let i = 0; i < n; i++) { const r = StlNav.place(M.world, ts.route[i], ts.s[i], ts.off[i]); p.lon[i] = r[0]; p.lat[i] = r[1]; p.hd[i] = r[2]; p.on[i] = ts.active[i]; }
-  }
-
-  function startVoyage() {
-    const w = M.world, nav = M.nav = StlNav.voyage(w, M.voyage), p = nav.path, e = p[p.length - 1];
-    const th = Math.atan2((p[1].lat - p[0].lat) * KY, (p[1].lon - p[0].lon) * KY * Math.cos(p[0].lat * RAD));
-    M.trail = []; M.hist = []; M.done = false; M.status = ''; M.acc = 0; M.info = null; M.pos = M.prev = null;
-    M.s = StlNav.reset(w, { lon: p[0].lon, lat: p[0].lat, th, goalLon: e.lon, goalLat: e.lat, cls: 0, seed: M.seed });
-    M.own0 = { lon: M.s.lon, lat: M.s.lat, th: M.s.th }; snapshot(); snapshot(); fitMap(); mapReadouts();
-  }
-
-  function fitMap() {
-    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
-    for (const q of M.nav.path) { x0 = Math.min(x0, toX(q.lon)); x1 = Math.max(x1, toX(q.lon)); y0 = Math.min(y0, toY(q.lat)); y1 = Math.max(y1, toY(q.lat)); }
-    const wide = W > 720, left = wide ? 420 : 24, right = wide ? 310 : 24, top = wide ? 40 : 250, bottom = wide ? 70 : 150;   // room left free by the panels
-    M.cam.s = clamp(Math.min((W - left - right) / (x1 - x0 + 30), (Hh - top - bottom) / (y1 - y0 + 30)), 0.25, 30);
-    M.cam.x = (x0 + x1) / 2 - (left - right) / 2 / M.cam.s; M.cam.y = (y0 + y1) / 2 - (top - bottom) / 2 / M.cam.s;
-  }
-
-  function stepMap(dtReal) {
-    if (M.paused || M.done) return;
-    const w = M.world, dt = w.cfg.dt; M.acc += dtReal * M.rate;
-    for (let n = 0; M.acc >= dt && n < 200 && !M.done; n++) {
-      const s = M.s; M.acc -= dt; M.own0 = { lon: s.lon, lat: s.lat, th: s.th };
-      const info = M.info = StlNav.step(w, s, StlNav.pilot(w, s, M.nav, M.thr)), el = hm(s.t - s.t0); snapshot();
-      if (Math.round(s.t / dt) % 3 === 0) M.trail.push(toX(s.lon), toY(s.lat));
-      M.hist.push(info.speed, info.conc > 0.01 && info.thick > 0.01 ? info.conc : 0);
-      if (M.hist.length > 8000) M.hist = M.hist.filter((v, i) => i % 4 < 2);                     // keep the whole voyage, at half the detail
-      if (info.arrived) { M.done = true; M.status = 'Arrived after ' + el + '.'; }
-      else if (info.collision) { M.done = true; M.status = 'Collision with another ship after ' + el + '. Restart to sail again.'; }
-      else if (info.aground) { M.done = true; M.status = 'Aground after ' + el + '. Restart to sail again.'; }
-      else M.status = info.vGoal === 0 && M.thr > 0 && info.conc > 0.01 ? 'Stopped by the ice. Open the throttle, or send the ship around.' : M.nav.avoiding ? 'Keeping clear of another ship.' : '';
-    }
-    if (M.done) M.acc = 0;
-  }
-
-  function glyph(x, y, hd, len, fill) {   // a ship as an arrowhead; hd is the heading in radians from east, and north is up
-    const c = Math.cos(hd), s = -Math.sin(hd), wd = len * 0.34;
-    ctx.beginPath(); ctx.moveTo(x + c * len * 0.6, y + s * len * 0.6); ctx.lineTo(x - c * len * 0.4 - s * wd, y - s * len * 0.4 + c * wd); ctx.lineTo(x - c * len * 0.4 + s * wd, y - s * len * 0.4 - c * wd); ctx.closePath();
-    ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.stroke();
-  }
-
-  function renderMap() {
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = M.world ? LAND : col.sea; ctx.fillRect(0, 0, W, Hh);                 // outside the grid counts as land
-    ctx.font = '500 13.5px "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif'; ctx.textBaseline = 'middle';
-    if (!M.world) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.textAlign = 'center'; ctx.fillText(M.error || 'Loading the St. Lawrence map', W / 2, Hh / 2); return; }
-    const c = M.cam, w = M.world, g = w.g, rt = w.routes, X = x => (x - c.x) * c.s + W / 2, Y = y => (y - c.y) * c.s + Hh / 2, a = M.done ? 1 : clamp(M.acc / w.cfg.dt, 0, 1);
-    const ix = X(-0.5 * g.dlon * M.kx), iy = Y(-0.5 * g.dlat * KY), iw = g.nx * g.dlon * M.kx * c.s, ih = g.ny * g.dlat * KY * c.s;
-    ctx.fillStyle = col.sea; ctx.fillRect(ix, iy, iw, ih); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(M.img, ix, iy, iw, ih);
-    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(20,60,80,0.35)'; ctx.beginPath();                 // the routes of the traffic
-    for (let r = 0; r < w.R; r++) {
-      if (rt.name[r].endsWith('(return)')) continue;
-      for (let k = 0; k < rt.lon[r].length; k++) { if (k && rt.lon[r][k] === rt.lon[r][k - 1] && rt.lat[r][k] === rt.lat[r][k - 1]) break; const x = X(toX(rt.lon[r][k])), y = Y(toY(rt.lat[r][k])); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
-    }
-    ctx.stroke();
-    const s = M.s, o = M.own0, lon = o.lon + (s.lon - o.lon) * a, lat = o.lat + (s.lat - o.lat) * a, sx = X(toX(lon)), sy = Y(toY(lat));
-    if (M.trail.length > 3) { ctx.beginPath(); ctx.moveTo(X(M.trail[0]), Y(M.trail[1])); for (let i = 2; i < M.trail.length; i += 2) ctx.lineTo(X(M.trail[i]), Y(M.trail[i + 1])); ctx.lineTo(sx, sy); ctx.lineWidth = 2; ctx.strokeStyle = col.accent; ctx.stroke(); }
-    if (!M.done) {                                                                                // the course ahead
-      ctx.setLineDash([4, 4]); ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.beginPath(); ctx.moveTo(sx, sy);
-      const nav = M.nav; if (nav.manual) ctx.lineTo(X(toX(nav.manual.lon)), Y(toY(nav.manual.lat)));
-      for (let k = nav.k; k < nav.path.length; k++) ctx.lineTo(X(toX(nav.path[k].lon)), Y(toY(nav.path[k].lat)));
-      ctx.stroke(); ctx.setLineDash([]);
-      if (nav.manual) { ctx.beginPath(); ctx.arc(X(toX(nav.manual.lon)), Y(toY(nav.manual.lat)), 6, 0, TAU); ctx.stroke(); }
-    }
-    const ts = s.traffic, p = M.pos, q = M.prev, len = clamp(5 + c.s * 2.2, 7, 13);
-    for (let i = 0; i < ts.n; i++) {
-      if (!p.on[i]) continue;
-      const jump = !q.on[i] || Math.abs(p.lon[i] - q.lon[i]) + Math.abs(p.lat[i] - q.lat[i]) > 0.05, b = jump ? 1 : a;   // a slot that has just been given a new ship is not drawn in between
-      glyph(X(toX(q.lon[i] + (p.lon[i] - q.lon[i]) * b)), Y(toY(q.lat[i] + (p.lat[i] - q.lat[i]) * b)), p.hd[i], len, SHIP_COL[w.classes[ts.cls[i]].name] || '#0f2530');
-    }
-    glyph(sx, sy, o.th + (s.th - o.th) * a, len * 1.5, '#bd3620');
-    ctx.lineJoin = 'round';
-    for (const k in LABELS) {   // place names, written towards the middle of the window
-      const px = X(toX(w.places[k][1])), py = Y(toY(w.places[k][0])), lf = px > W * 0.6; ctx.textAlign = lf ? 'right' : 'left';
-      ctx.fillStyle = '#f2f6f7'; ctx.beginPath(); ctx.arc(px, py, 2.2, 0, TAU); ctx.fill();
-      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(8,30,40,0.75)'; ctx.strokeText(LABELS[k], px + (lf ? -8 : 8), py - 9); ctx.fillText(LABELS[k], px + (lf ? -8 : 8), py - 9);
-    }
-    const km = [5, 10, 20, 50, 100, 200, 500].find(v => v * c.s >= 70) || 500, bx = W / 2 - km * c.s / 2, by = Hh - (W > 980 ? 62 : 150);   // scale bar
-    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.moveTo(bx, by - 4); ctx.lineTo(bx, by); ctx.lineTo(bx + km * c.s, by); ctx.lineTo(bx + km * c.s, by - 4); ctx.stroke();
-    ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(8,30,40,0.75)'; ctx.strokeText(km + ' km', bx + km * c.s / 2, by - 11); ctx.fillStyle = '#f2f6f7'; ctx.fillText(km + ' km', bx + km * c.s / 2, by - 11);
-  }
-
-  function drawMapTrace() {   // speed through the water since departure, with the share of ice at the ship behind it
-    const w = tr.clientWidth, h = tr.clientHeight; if (!w || !h) return;
-    if (tr.width !== Math.round(w * dpr) || tr.height !== Math.round(h * dpr)) { tr.width = Math.round(w * dpr); tr.height = Math.round(h * dpr); }
-    const g = tctx; g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  function drawSpeed() {   // far view: speed through the water since departure, with the share of ice at the ship behind it
+    const wh = sizeTrace(); if (!wh) return; const w = wh[0], h = wh[1], g = tctx;
     const padL = 52, padT = 6, pw = w - padL - 2, ph = h - padT - 4, top = 10, Y = v => padT + ph * (1 - clamp(v / top, 0, 1)), n = M.hist.length / 2;
     g.font = '10.5px "IBM Plex Mono", ui-monospace, Menlo, monospace'; g.textAlign = 'right'; g.textBaseline = 'middle'; g.lineWidth = 1;
     for (let t = 0; t <= 2; t++) { const v = top * t / 2, y = Math.round(Y(v)) + 0.5; g.strokeStyle = col.line; g.beginPath(); g.moveTo(padL, y); g.lineTo(w - 2, y); g.stroke(); g.fillStyle = col.muted; g.fillText(v + ' m/s', padL - 6, Math.min(h - 6, Math.max(6, y))); }
@@ -589,44 +656,26 @@
     g.beginPath(); for (let i = 0; i < n; i++) { if (i) g.lineTo(X(i), Y(M.hist[2 * i])); else g.moveTo(X(i), Y(M.hist[2 * i])); }
     g.strokeStyle = col.accent; g.lineWidth = 1.4; g.lineJoin = 'round'; g.stroke();
   }
+  function setTrace() {
+    const close = M.mode === 'physics'; $('traceTitle').textContent = close ? 'Ice force along the hull, last 20 s' : 'Speed since departure'; $('legForce').hidden = !close; $('legSpeed').hidden = close;
+  }
 
-  function mapReadouts() {
+  function readouts() {
     const s = M.s, w = M.world; if (!s) return;
-    const f = StlNav.sample(w, s.lon, s.lat, s.t, {}), ice = f.conc > 0.01 && f.thick > 0.01, i = M.info, ts = s.traffic, gk = i ? i.goalKm : distKm(s.lon, s.lat, M.nav.path[M.nav.path.length - 1]);
-    $('mTime').textContent = hm(s.t - s.t0);
-    $('mSpeed').textContent = s.v.toFixed(1) + ' m/s · ' + (s.v * 1.944).toFixed(1) + ' kn';
-    $('mIce').textContent = ice ? Math.round(f.conc * 100) + ' % · ' + f.thick.toFixed(2) + ' m' + (i && i.inTrack ? ' · in a track' : '') : 'open water';
-    $('mGoal').textContent = Math.round(gk) + ' km in a straight line';
-    let near = Infinity, count = 0; for (let k = 0; k < ts.n; k++) if (ts.active[k]) { count++; near = Math.min(near, distKm(s.lon, s.lat, { lon: M.pos.lon[k], lat: M.pos.lat[k] })); }
-    $('mNear').textContent = count ? (near < 10 ? near.toFixed(1) : Math.round(near)) + ' km' : 'none'; $('mShips').textContent = count;
-    const msg = M.flash && performance.now() < M.flashUntil ? M.flash : M.status; $('mStatus').textContent = msg; $('mStatus').hidden = !msg;
-    const t = Math.round(M.thr * 100); if (+$('mthr').value !== t) { $('mthr').value = t; $('mthrOut').textContent = t + ' %'; }
-    const pc = Math.round(f.conc * 100), can = ice && pc >= 60; $('breakHere').disabled = !can; $('breakHere').classList.toggle('primary', can);   // whole per cent, as shown
-    $('breakNote').textContent = !ice ? 'The ship is in open water: there is no ice to break here.' : !can ? 'The ice here is too open (under 60 %) for the ice-breaking view.'
-      : 'Opens the ice-breaking view in ' + (pc >= 90 ? 'level ice' : 'broken pack') + ' of this thickness, at this throttle.';
-  }
-
-  function breakHere() {   // the ice under the ship, in the ice-breaking simulator
-    const s = M.s, f = StlNav.sample(M.world, s.lon, s.lat, s.t, {}), pc = Math.round(f.conc * 100); if (!(pc >= 60 && f.thick > 0.01)) return;
-    const h = clamp(Math.round(f.thick / 0.05) * 0.05, 0.2, 1.6), t = Math.round(M.thr * 100);
-    scenario = pc >= 90 ? 'level' : 'pack'; press(document.querySelector('[data-sc]').parentNode, document.querySelector('[data-sc="' + scenario + '"]'));
-    $('h').value = h; $('hOut').textContent = h.toFixed(2) + ' m'; $('thr').value = t; $('thrOut').textContent = t + ' %'; seed++; start();
-    fromMap = { conc: f.conc }; const note = $('fromMap'); note.hidden = false;
-    note.textContent = 'Ice taken from the map at ' + s.lat.toFixed(2) + '° N, ' + (-s.lon).toFixed(2) + '° W: ' + pc + ' %, ' + f.thick.toFixed(2) + ' m'
-      + (scenario === 'pack' ? ', shown as broken pack, whose own share of ice differs.' : '.');
-    setView('hull'); paused = false; $('pause').textContent = 'Pause';
-  }
-
-  function setView(v) {
-    view = v;
-    for (const el of document.querySelectorAll('[data-view]')) el.hidden = el.dataset.view !== v;
-    for (const b of document.querySelectorAll('[data-vw]')) b.setAttribute('aria-pressed', b.dataset.vw === v ? 'true' : 'false');
-    $('traceTitle').textContent = v === 'map' ? 'Speed since departure' : 'Ice force along the hull, last 20 s';
-    $('hint').textContent = v === 'map' ? 'Click water to send the ship there · drag to move · scroll to zoom' : 'Click the ice to set a course · A/D steer · W/S throttle · scroll to zoom';
-    $('pause').textContent = (v === 'map' ? M.paused : paused) ? 'Play' : 'Pause';
-    cv.setAttribute('aria-label', v === 'map' ? 'Map of the estuary and Gulf of St. Lawrence with ice, routes and ships' : 'Top-down view of a ship breaking through sea ice');
-    try { history.replaceState(null, '', v === 'map' ? '#st-lawrence' : location.pathname + location.search); } catch (e) { /* not allowed in some embeds */ }
-    firstFrame = true; layout(); if (v === 'map' && M.world) { if (!M.cam.fitted) { fitMap(); M.cam.fitted = true; } mapReadouts(); }
+    const f = StlNav.sample(w, s.lon, s.lat, s.t, {}), ice = f.conc > 0.01 && f.thick > 0.01, i = M.info, ts = s.traffic, close = M.mode === 'physics', r = M.rate;
+    $('rClock').textContent = paused ? 'paused' : close ? (r < 1.05 ? 'real time' : r.toFixed(1) + ' × real time') + ' · breaking ice' : r >= 3600 ? (r / 3600).toFixed(1) + ' h per second' : r >= 90 ? Math.round(r / 60) + ' min per second' : Math.round(r) + ' × real time';
+    $('rTime').textContent = hm(s.t - s.t0);
+    $('rSpeed').textContent = s.v.toFixed(1) + ' m/s · ' + (s.v * 1.944).toFixed(1) + ' kn';
+    $('rHere').textContent = ice ? Math.round(f.conc * 100) + ' % · ' + f.thick.toFixed(2) + ' m' + (i && i.inTrack ? ' · in a track' : '') : 'open water';
+    $('rIceLabel').textContent = close ? 'Ice resistance, 10 s mean' : 'Ice resistance, from the model';
+    $('rIce').textContent = fmtF(close ? meanForce(300) : StlNav.iceResistance(w, w.classes[s.cls], f.thick, s.v, f.conc, w.sigF, i && i.inTrack));
+    $('rGoal').textContent = Math.round(i && i.goalKm !== undefined ? i.goalKm : distKm(s.lon, s.lat, M.nav.path[M.nav.path.length - 1])) + ' km in a straight line';
+    let near = Infinity, count = 0; for (let q = 0; q < ts.n; q++) if (ts.active[q]) { count++; near = Math.min(near, distKm(s.lon, s.lat, { lon: M.pos.lon[q], lat: M.pos.lat[q] })); }
+    $('rShips').textContent = (count ? (near < 10 ? near.toFixed(1) : Math.round(near)) + ' km' : 'none') + ' · ' + count;
+    $('rBreaks').textContent = close ? sim.stats.cusps + ' · ' + physMs.toFixed(1) + ' ms per frame' : 'zoom in on the ship';
+    $('lqLegend').hidden = !levelHere();
+    const msg = M.flash && performance.now() < M.flashUntil ? M.flash : M.status; $('status').textContent = msg; $('status').hidden = !msg;
+    const t = Math.round(M.thr * 100); if (+$('thr').value !== t) { $('thr').value = t; $('thrOut').textContent = t + ' %'; }
   }
 
   // ---------------------------------------------------------------- main loop
@@ -635,36 +684,8 @@
     requestAnimationFrame(frame);
     const dtReal = Math.min(0.05, (now - last) / 1000 || 0.016); last = now; frameNo++;
     if (frameNo % 45 === 1) readTheme();
-    if (view === 'map') {
-      if (keys.w || keys.arrowup) M.thr = clamp(M.thr + 0.7 * dtReal, 0, 1);
-      if (keys.s || keys.arrowdown) M.thr = clamp(M.thr - 0.7 * dtReal, 0, 1);
-      if (M.world) stepMap(dtReal);
-      renderMap();
-      if (frameNo % 3 === 0) drawMapTrace();
-      if (frameNo % 12 === 0 && M.world) mapReadouts();
-      return;
-    }
-    const s = sim.ship;
-    if (keys.a || keys.arrowleft || keys.d || keys.arrowright) { sim.ap.on = false; sim.ap.hasTarget = false; s.rudCmd = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0); }
-    else if (!sim.ap.on) s.rudCmd = 0;
-    if (keys.w || keys.arrowup) s.thr = clamp(s.thr + 0.7 * dtReal, -1, 1);
-    if (keys.s || keys.arrowdown) s.thr = clamp(s.thr - 0.7 * dtReal, -1, 1);
-    if (!paused) {
-      const t0 = performance.now(), n0 = sim.accN; sim.accX = 0; sim.accN = 0;
-      IceSim.advance(sim, dtReal * speed);
-      physMs += (performance.now() - t0 - physMs) * 0.08;
-      if (sim.accN) {
-        trClock += sim.accN * sim.dt;
-        if (trClock >= 1 / 30) { trace[trPos] = -sim.accX / sim.accN; trPos = (trPos + 1) % TR_N; if (trCount < TR_N) trCount++; trClock = 0; }
-      }
-      const sp = Math.abs(s.u);
-      if (sp > 0.4 && s.thr > 0.05) for (let q = 0; q < 2; q++) { const c = Math.cos(s.th), sn = Math.sin(s.th), by = (q ? 3.2 : -3.2) + (Math.random() - 0.5) * 2, bx = -s.L / 2 - 1; wake.push({ x: s.x + c * bx - sn * by, y: s.y + sn * bx + c * by, vx: -c * 1.5 * s.thr, vy: -sn * 1.5 * s.thr, age: 0, life: 5 + 3 * Math.random() }); }
-      const dts = dtReal * speed; let w = 0;
-      for (let i = 0; i < wake.length; i++) { const p = wake[i]; p.age += dts; if (p.age >= p.life) continue; p.x += p.vx * dts; p.y += p.vy * dts; p.vx *= 0.97; p.vy *= 0.97; wake[w++] = p; }
-      wake.length = w;
-    }
-    render(dtReal);
-    if (frameNo % 3 === 0) drawTrace();
+    update(dtReal); draw();
+    if (frameNo % 3 === 0) { if (M.mode === 'physics') drawForce(); else drawSpeed(); }
     if (frameNo % 12 === 0) readouts();
   }
 
@@ -674,30 +695,23 @@
   }
 
   // ---------------------------------------------------------------- controls
-  function press(group, btn) { for (const b of group.querySelectorAll('button')) b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'); }
-  const leaveMapIce = () => { fromMap = null; $('fromMap').hidden = true; };                    // the ice no longer is the one taken from the map
-  for (const b of document.querySelectorAll('[data-sc]')) b.addEventListener('click', () => { scenario = b.dataset.sc; press(b.parentNode, b); leaveMapIce(); start(); });
-  for (const b of document.querySelectorAll('[data-vw]')) b.addEventListener('click', () => setView(b.dataset.vw));
-  for (const b of document.querySelectorAll('[data-mr]')) b.addEventListener('click', () => { M.rate = +b.dataset.mr; press(b.parentNode, b); });
-  $('voy').addEventListener('change', e => { M.voyage = +e.target.value; e.target.blur(); if (M.world) { startVoyage(); M.cam.fitted = true; } });
-  $('mh').addEventListener('input', e => { const v = +e.target.value; $('mhOut').textContent = v.toFixed(2) + ' m'; if (M.world) M.world.thick = v; });
-  $('mthr').addEventListener('input', e => { const v = +e.target.value; $('mthrOut').textContent = v + ' %'; M.thr = v / 100; });
-  for (const id of ['mh', 'mthr']) $(id).addEventListener('change', e => e.target.blur());
-  $('breakHere').addEventListener('click', breakHere);
-  for (const b of document.querySelectorAll('[data-sp]')) b.addEventListener('click', () => { speed = +b.dataset.sp; press(b.parentNode, b); });
-  $('h').addEventListener('input', e => { const v = +e.target.value; $('hOut').textContent = v.toFixed(2) + ' m'; IceSim.setThickness(sim, v); leaveMapIce(); });
-  $('sf').addEventListener('input', e => { const v = +e.target.value; $('sfOut').textContent = v.toFixed(2) + ' MPa'; sim.P.sigF = v * 1e6; sim.Rs0 = IceSim.lindqvist(sim, sim.P.h, 0).Rs; });
-  $('thr').addEventListener('input', e => { const v = +e.target.value; $('thrOut').textContent = v + ' %'; sim.ship.thr = v / 100; });
+  function setFollow(on) { M.follow = on; $('follow').setAttribute('aria-pressed', on ? 'true' : 'false'); }
+  function zoomBy(f, px, py) {   // about the ship when the view follows it, else about a point of the window (default: its middle)
+    const v = M.view, s1 = clamp(v.s * f, 0.25, 9000); if (!M.follow && px !== undefined) { v.x += px * (1 / v.s - 1 / s1); v.y += py * (1 / v.s - 1 / s1); } v.s = s1;
+  }
+  $('voy').addEventListener('change', e => { M.voyage = +e.target.value; e.target.blur(); if (M.world) startVoyage(); });
+  $('h').addEventListener('input', e => { const v = +e.target.value; $('hOut').textContent = v.toFixed(2) + ' m'; if (M.world) M.world.thick = v; if (sim) IceSim.setThickness(sim, v); });
+  $('sf').addEventListener('input', e => { const v = +e.target.value; $('sfOut').textContent = v.toFixed(2) + ' MPa'; if (M.world) M.world.sigF = v * 1e6; if (sim) sim.P.sigF = v * 1e6; });
+  $('thr').addEventListener('input', e => { const v = +e.target.value; $('thrOut').textContent = v + ' %'; M.thr = v / 100; });
   for (const id of ['h', 'sf', 'thr']) $(id).addEventListener('change', e => e.target.blur());
   $('loads').addEventListener('change', e => { showLoads = e.target.checked; });
   $('cracks').addEventListener('change', e => { showCracks = e.target.checked; });
-  const isPaused = () => (view === 'map' ? M.paused : paused);
-  function setPaused(p) { if (view === 'map') M.paused = p; else paused = p; $('pause').textContent = p ? 'Play' : 'Pause'; }
-  $('pause').addEventListener('click', () => setPaused(!isPaused()));
-  $('restart').addEventListener('click', () => { if (view === 'map') { M.seed++; if (M.world) startVoyage(); } else { seed++; start(); } });
-  const zoomBy = k => { if (view === 'map') M.cam.s = clamp(M.cam.s * k, 0.25, 40); else zoom = clamp(zoom * k, 0.35, 5); };
-  $('zin').addEventListener('click', () => zoomBy(1.3));
-  $('zout').addEventListener('click', () => zoomBy(1 / 1.3));
+  function setPaused(p) { paused = p; $('pause').textContent = p ? 'Play' : 'Pause'; }
+  $('pause').addEventListener('click', () => setPaused(!paused));
+  $('restart').addEventListener('click', () => { M.seed++; if (M.world) startVoyage(); });
+  $('follow').addEventListener('click', () => setFollow(!M.follow));
+  $('zin').addEventListener('click', () => zoomBy(2));
+  $('zout').addEventListener('click', () => zoomBy(0.5));
   const narrow = matchMedia('(max-width: 720px)');
   function layout() { const c = $('controls'); c.hidden = narrow.matches && $('toggleControls').getAttribute('aria-expanded') !== 'true'; $('tracebox').hidden = narrow.matches && !c.hidden; }
   $('toggleControls').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-expanded', b.getAttribute('aria-expanded') === 'true' ? 'false' : 'true'); layout(); });
@@ -708,49 +722,49 @@
     if (e.metaKey || e.ctrlKey || e.altKey) return; const k = e.key.toLowerCase(), t = e.target;
     if (t && t.tagName === 'INPUT' && t.type === 'range') return;
     if (KEYS.includes(k)) { keys[k] = true; e.preventDefault(); }
-    else if (k === ' ' && !(t && (t.tagName === 'BUTTON' || t.tagName === 'SELECT'))) { setPaused(!isPaused()); e.preventDefault(); }
+    else if (k === ' ' && !(t && (t.tagName === 'BUTTON' || t.tagName === 'SELECT'))) { setPaused(!paused); e.preventDefault(); }
   });
   addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
-  let down = null;
-  cv.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY, cx: M.cam.x, cy: M.cam.y, moved: false }; if (view === 'map') cv.setPointerCapture(e.pointerId); });
-  cv.addEventListener('pointermove', e => {   // on the map, dragging moves the map
-    if (view !== 'map' || !down) return; const dx = e.clientX - down.x, dy = e.clientY - down.y;
-    if (!down.moved && Math.hypot(dx, dy) < 6) return; down.moved = true; M.cam.x = down.cx - dx / M.cam.s; M.cam.y = down.cy - dy / M.cam.s;
+
+  // pointer: a click sends the ship somewhere, a drag moves the map, two fingers zoom
+  const touch = new Map(); let down = null, pinch = 0;
+  cv.addEventListener('pointerdown', e => {
+    touch.set(e.pointerId, { x: e.clientX, y: e.clientY }); cv.setPointerCapture(e.pointerId);
+    if (touch.size === 1) down = { x: e.clientX, y: e.clientY, vx: M.view.x, vy: M.view.y, moved: false };
+    else { down = null; const p = [...touch.values()]; pinch = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); }
   });
-  cv.addEventListener('pointercancel', () => { down = null; });
-  cv.addEventListener('pointerup', e => {
-    const d = down; down = null; if (!d) return; const r = cv.getBoundingClientRect(), px = e.clientX - r.left - W / 2, py = e.clientY - r.top - Hh / 2;
-    if (view === 'map') {   // a click on water sends the ship there before it goes on with its route
-      if (d.moved || !M.world || M.done) return;
-      const lon = M.lonW + (M.cam.x + px / M.cam.s) / M.kx, lat = M.latN - (M.cam.y + py / M.cam.s) / KY;
-      const s = M.s, km = distKm(s.lon, s.lat, { lon, lat }); let water = StlNav.landAt(M.world, lon, lat) < 0.5;
-      for (let q = 1; water && q < km; q++) water = StlNav.landAt(M.world, s.lon + (lon - s.lon) * q / km, s.lat + (lat - s.lat) * q / km) < 0.5;   // every kilometre of the straight line
-      if (water) M.nav.manual = { lon, lat }; else { M.flash = 'Land lies between the ship and that place.'; M.flashUntil = performance.now() + 3500; }
-      mapReadouts(); return;
+  cv.addEventListener('pointermove', e => {
+    if (!touch.has(e.pointerId)) return; touch.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touch.size === 2) {
+      const p = [...touch.values()], d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y), r = cv.getBoundingClientRect();
+      if (pinch > 0 && d > 0) zoomBy(d / pinch, (p[0].x + p[1].x) / 2 - r.left - W / 2, (p[0].y + p[1].y) / 2 - r.top - Hh / 2); pinch = d; return;
     }
-    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 8) return;
-    const ap = sim.ap; ap.tx = cam.x + px / cam.s; ap.ty = cam.y + py / cam.s; ap.hasTarget = true; ap.on = true;
+    if (!down) return; const dx = e.clientX - down.x, dy = e.clientY - down.y;
+    if (!down.moved && Math.hypot(dx, dy) < 6) return; down.moved = true; setFollow(false); M.view.x = down.vx - dx / M.view.s; M.view.y = down.vy - dy / M.view.s;
   });
-  cv.addEventListener('wheel', e => {
-    e.preventDefault(); const k = Math.exp(-e.deltaY * 0.0015);
-    if (view !== 'map') { zoom = clamp(zoom * k, 0.35, 5); return; }
-    const r = cv.getBoundingClientRect(), px = e.clientX - r.left - W / 2, py = e.clientY - r.top - Hh / 2, s0 = M.cam.s, s1 = clamp(s0 * k, 0.25, 40);   // zoom about the pointer
-    M.cam.x += px * (1 / s0 - 1 / s1); M.cam.y += py * (1 / s0 - 1 / s1); M.cam.s = s1;
-  }, { passive: false });
+  const lift = e => { touch.delete(e.pointerId); pinch = 0; };
+  cv.addEventListener('pointercancel', e => { lift(e); down = null; });
+  cv.addEventListener('pointerup', e => {
+    const d = down, was = touch.size; lift(e); down = null; if (!d || was !== 1 || d.moved || !M.world || M.done) return;
+    const r = cv.getBoundingClientRect(), v = M.view, lon = M.lonW + (v.x + (e.clientX - r.left - W / 2) / v.s) / M.kx, lat = M.latN - (v.y + (e.clientY - r.top - Hh / 2) / v.s) / KY;
+    const s = M.s, km = distKm(s.lon, s.lat, { lon, lat }); let water = StlNav.landAt(M.world, lon, lat) < 0.5;
+    for (let q = 1; water && q < km; q++) water = StlNav.landAt(M.world, s.lon + (lon - s.lon) * q / km, s.lat + (lat - s.lat) * q / km) < 0.5;   // every kilometre of the straight line
+    if (water) { M.nav.manual = { lon, lat, reach: clamp(0.25 * km, 0.05, 2) }; M.byHand = false; } else { M.flash = 'Land lies between the ship and that place.'; M.flashUntil = performance.now() + 3500; }
+    readouts();
+  });
+  cv.addEventListener('wheel', e => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left - W / 2, e.clientY - r.top - Hh / 2); }, { passive: false });
 
   function boot() {
-    readTheme(); resize(); makeWater(); layout(); setPaused(paused); start();
+    readTheme(); resize(); makeWater(); layout(); setPaused(paused); setTrace();
     new ResizeObserver(resize).observe($('app'));
-    window.__ice = { get sim() { return sim; }, cam, map: M, set(k, v) { if (k === 'zoom') zoom = v; if (k === 'loads') showLoads = v; },
-      advanceMap(hours) {   // for tests: sail the map's voyage on by so many hours without waiting for frames, then redraw
-        if (!M.world) return; const p = M.paused, r = M.rate; M.paused = false; M.rate = 3600;
-        for (let i = 0; i < hours * 20 && !M.done; i++) stepMap(0.05);
-        M.paused = p; M.rate = r; mapReadouts(); if (view === 'map') { renderMap(); drawMapTrace(); }
+    window.__ice = { get sim() { return sim; }, map: M, cam,
+      zoomTo(mpp) { M.view.s = clamp(1000 / mpp, 0.25, 9000); },                                // metres per pixel
+      run(seconds, dt) {   // for tests: let so many seconds of real time pass, without waiting for frames, then redraw
+        dt = dt || 1 / 60; for (let t = 0; t < seconds; t += dt) update(dt); draw(); readouts(); if (M.mode === 'physics') drawForce(); else drawSpeed();
       } };
     fetch('stl-data.json').then(r => { if (!r.ok) throw new Error('error ' + r.status); return r.json(); }).then(loadMap)
-      .catch(e => { M.error = 'The St. Lawrence map could not be loaded (' + e.message + ').'; });
-    if (location.hash === '#st-lawrence') setView('map');
+      .catch(e => { M.error = 'The St. Lawrence could not be loaded (' + e.message + ').'; });
     requestAnimationFrame(frame);
   }
   boot();

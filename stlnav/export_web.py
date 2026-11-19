@@ -12,12 +12,19 @@ table, and the settings of traffic.py and env.py, so that stlnav-core.js copies 
 
 `fields_from_web` rebuilds a Fields from the file, so that Python can be run on exactly the data the
 page uses (checks/stlnav_js.py does that).
+
+It also writes stl-map.png, which the page only draws: the same chart on its own grid of about 1 km, twice
+to three times finer than the model's, so that coasts and ice edges are not drawn as 2 km squares. One
+byte per cell: 255 = land, else concentration * 250. Land is where the chart has no data, which follows
+the coast at 1 km. The exception is an inlet that the chart leaves out and the model has as water (at
+least 3 x 3 model cells): it is drawn as open water, which is what the model takes it for.
 """
 from __future__ import annotations
 
 import argparse
 import base64
 import json
+import os
 
 import numpy as np
 
@@ -80,6 +87,46 @@ def export(f: F.Fields, chart_date: str) -> dict:
     )
 
 
+def chart_picture(path, f: F.Fields):
+    """The chart on its own grid, cut to the model's area: (bytes [ny, nx] with north at the top, description)."""
+    import xarray as xr
+
+    with xr.open_dataset(path) as ds:
+        a = np.squeeze(ds["sic"].values).astype(np.float32) / 100.0
+        lat, lon = ds["latitude"].values, ds["longitude"].values
+    if lat[0] < lat[-1]:
+        a, lat = a[::-1], lat[::-1]
+    kj = (lat >= f.lat[0] - 0.5 * f.dlat) & (lat <= f.lat[-1] + 0.5 * f.dlat)
+    ki = (lon >= f.lon[0] - 0.5 * f.dlon) & (lon <= f.lon[-1] + 0.5 * f.dlon)
+    a, lat, lon = a[kj][:, ki], lat[kj], lon[ki]
+    j = np.clip(np.round((lat - f.lat0) / f.dlat).astype(int), 0, f.land.shape[0] - 1)
+    i = np.clip(np.round((lon - f.lon0) / f.dlon).astype(int), 0, f.land.shape[1] - 1)
+    from scipy import ndimage
+
+    # water of the model that the chart has no data for: a fringe one cell wide along the coasts, where the chart's coast is
+    # the better one, and a few inlets, which stay water. An opening by 3 x 3 cells keeps the inlets only.
+    gap = np.isnan(a) & ~(f.land[np.ix_(j, i)] > 0.5)
+    lat_m, lon_m = np.abs(lat[None, :] - f.lat[:, None]).argmin(1), np.abs(lon[None, :] - f.lon[:, None]).argmin(1)
+    gap_m = np.isnan(a[np.ix_(lat_m, lon_m)]) & ~(f.land > 0.5)
+    inlet = ndimage.binary_opening(gap_m, structure=np.ones((3, 3), bool))[np.ix_(j, i)]
+    land = np.isnan(a) & ~(gap & inlet)
+    img = np.where(land, 255, np.round(np.clip(np.nan_to_num(a), 0, 1) * CONC_SCALE)).astype(np.uint8)
+    return img, dict(file="stl-map.png", scale=CONC_SCALE, nx=int(img.shape[1]), ny=int(img.shape[0]), lon0=float(lon[0]), lat0=float(lat[0]),
+                     dlon=float(lon[1] - lon[0]), dlat=float(lat[0] - lat[1]))
+
+
+def write_png(path, img):
+    """An 8-bit greyscale PNG, written with the standard library."""
+    import struct
+    import zlib
+
+    h, w = img.shape
+    chunk = lambda kind, body: struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+    rows = b"".join(b"\x00" + np.ascontiguousarray(img[r]).tobytes() for r in range(h))
+    with open(path, "wb") as fh:
+        fh.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 0, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
+
+
 def fields_from_web(d: dict, thick: float) -> F.Fields:
     """The fields exactly as the page sees them, on the full grid (the coarse ones are spread bilinearly)."""
     g = d["grid"]
@@ -114,10 +161,14 @@ def main():
     f = F.load(a.cache)
     f = F.with_ice(f, F.read_chart_concentration(a.ice, f), 0.3)
     d = export(f, a.ice.split("sic_")[-1][:10])
+    img, d["picture"] = chart_picture(a.ice, f)
+    png = os.path.join(os.path.dirname(a.out), d["picture"]["file"])
+    write_png(png, img)
     with open(a.out, "w") as fh:
         json.dump(d, fh, separators=(",", ":"))
     import gzip
-    import os
+    print(f"wrote {png}: {img.shape[1]} x {img.shape[0]} cells of {d['picture']['dlon'] * 111.195 * np.cos(np.deg2rad(48.75)):.2f} x {d['picture']['dlat'] * 111.195:.2f} km, "
+          f"{os.path.getsize(png) / 1e3:.0f} kB; land share {np.mean(img == 255):.2f}")
     print(f"wrote {a.out}: {os.path.getsize(a.out) / 1e3:.0f} kB, {len(gzip.compress(open(a.out, 'rb').read())) / 1e3:.0f} kB gzipped; "
           f"{len(d['routes']['name'])} routes, {len(d['classes'])} classes, {len(d['voyages'])} voyages")
 

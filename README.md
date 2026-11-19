@@ -2,7 +2,7 @@
 
 A fast, top-down simulation of a ship breaking sea ice, in two versions:
 
-- **A browser simulator** ([live page](https://pierrelucbacon.com/icebreaker-lab/)): a 76 m icebreaker in a continuous ice sheet, large floes or broken pack, with a live trace of the ice force on the hull. Click the ice to set a course, or steer with A/D and W/S. A second view, *St. Lawrence*, sails the same icebreaker through a chart of Gulf ice among generated traffic, and opens the ice under the ship in the first view.
+- **A browser page** ([live page](https://pierrelucbacon.com/icebreaker-lab/)): a 76 m icebreaker on a voyage through the ice and traffic of the St. Lawrence. Zoom out and you see the whole Gulf; zoom in on the ship and you see its hull break the ice, with a live trace of the ice force. Click the water to send the ship somewhere, or steer with A/D and W/S when you are close.
 - **A JAX environment** (`icebreaker_jax.py`): the continuous-sheet physics with fixed array shapes, so `reset` and `step` jit-compile and vmap over thousands of environments.
 
 ## Two scales
@@ -98,16 +98,27 @@ The table records the hull-scale constants it was measured with. If one of them 
 
 ### In the browser
 
-![The St. Lawrence view of the page](docs/st-lawrence-view.jpg)
+![Four zooms of the same voyage](docs/st-lawrence-view.jpg)
 
-*The St. Lawrence view, 5 h 54 into the voyage from Les Escoumins to Sept-Îles: ice in white, the routes of the traffic as thin lines, the other ships as arrowheads, the icebreaker's track in red and its course ahead dashed.*
+*The same voyage at four zooms. Top left: the Gulf, at 41 minutes per second. Top right: 3 m per pixel, where the ice-breaking simulator has taken over and the ice around the ship is made from the chart. Bottom left: the hull in level ice, in real time. Bottom right: further along, where the chart shows 80% ice and the ship pushes through floes.*
 
-The page has two views, and the second is the route-scale model.
+The page is one view of one ship on one clock. The camera sits on the map and zooms from the whole Gulf (1 km per pixel) down to the hull (a few centimetres per pixel). Which simulator moves the ship follows the zoom:
 
-- **Ice breaking** is the hull-scale simulator. Its readouts include the speed the route-scale model gives for the same ice and throttle, so the fit of the section above can be watched. In one run in 0.6 m of level ice at 80% throttle, the model gave 5.1 m/s and the simulated ship was at 5.3 m/s after 40 s. The browser version of the simulator differs a little from the JAX one the table was measured with (see Status below).
-- **St. Lawrence** is a map of the estuary and Gulf. It shows the ice chart of 15 February 2026 with one assumed thickness (a slider), the routes, and the generated ships; the currents and wind are those of the archived day of 17 November 2026. An icebreaker sails one of four voyages on the Coast Guard's ice route. A click on the water sends it there first. **Break the ice here** opens the ice under the ship in the first view, with the map's thickness and throttle: level ice where the chart shows 90% or more, broken pack between 60 and 90%.
+| | Far out | Close to the ship (under 6 m per pixel) |
+|---|---|---|
+| What moves the ship | the route-scale model, `stlnav-core.js` | the ice-breaking simulator, `icebreaker-core.js` |
+| Clock | 30 times real time up to 2 hours per second, faster the further out | 1 to 4 times real time |
+| Ice | the chart | level ice or floes made from the chart at the ship's place |
 
-`stlnav-core.js` is a port of `stlnav/ships.py`, `traffic.py` and `env.py`. It copies no number by hand: the fields, routes, ship classes, hull-scale table and settings all come from `stl-data.json` (760 kB, 160 kB compressed), which `stlnav/export_web.py` writes. The fields are reduced for the page: currents every 6 km and wind every 16 km, in 9 frames 3 hours apart, and the day repeats.
+The clock has to follow the zoom. Breaking ice is computed 360 times per second of the ship's time, which a browser manages at about the speed of a clock, and a voyage lasts 11 hours. Far out, the ship therefore moves with the model that the section above fits to the ice-breaking computation, so its speed does not jump when the two swap: in one run, the model had the ship at 7.48 m/s in 90% ice of 0.30 m, and the ice-breaking simulator held 7.46 to 7.49 m/s after taking over.
+
+**Endless ice around the ship.** The ice-breaking simulator used to hold one fixed sheet 1,100 m long. For the page it has a new scenario, `field`: the water is cut into squares of 256 m, each made when the ship comes near and dropped when it is far away. A square holds one sheet of level ice where the chart shows 90% or more, floes that cover the chart's share of the water below that, or nothing. The ship starts inside the ice with a channel astern. `checks/field.js` (4 checks, all passing) compares it with the fixed sheet: 7.55 against 7.53 m/s in 0.3 m of level ice, 5.94 against 5.92 m/s in 0.6 m.
+
+What is real and what is invented close to the ship: the share of ice and its (assumed) thickness come from the chart, cell by cell. The shapes of the floes are invented, because the chart only gives a share per kilometre. The coast is a smooth outline from 1 km data. Other ships are drawn but do not break ice.
+
+**The route-scale model in JavaScript.** `stlnav-core.js` is a port of `stlnav/ships.py`, `traffic.py` and `env.py`. It copies no number by hand: the fields, routes, ship classes, hull-scale table and settings all come from `stl-data.json` (760 kB, 160 kB compressed), which `stlnav/export_web.py` writes. The fields are reduced for the page: currents every 6 km and wind every 16 km, in 9 frames 3 hours apart, and the day repeats.
+
+The map is not drawn from the model's 2 km cells, which look like squares on a screen. `export_web.py` also writes `stl-map.png` (18 kB), the same chart on its own grid of about 1 km, and the page spreads each cell over 2 × 2 pixels with a light smoothing, so that coasts and ice edges come out as lines. The picture is only drawn: the model still works on 2 km cells, so within a cell of the coast the ship can be stopped by land that the picture shows as water.
 
 `checks/stlnav_js.py` runs the Python model on the page's data and compares the port with it (8 checks, all passing):
 
@@ -123,9 +134,7 @@ Random departures are switched off in those comparisons, because the two random 
 
 The page steers with a small pilot of its own; the Python package has none, because there the policy is what is to be learned. The pilot follows the route 1.5 km to its right and turns to starboard when another ship will pass within 1.2 km. Over 60 test voyages it arrived 59 times and collided once; without that rule it arrived 36 times.
 
-In one browser run, **Break the ice here** was pressed 3 h into the first voyage, in 90% ice of 0.30 m. The ice-breaking view opened in level ice of that thickness, and over the following 70 s the simulated ship averaged 7.36 m/s; the route-scale model gives 7.29 m/s for that ice.
-
-To rebuild the data file after a change to the routes, the classes or the table, check the port, and look at the page locally (then open http://localhost:8000):
+To rebuild the data file after a change to the routes, the classes or the table, run the checks of the page's two simulators, and look at the page locally (then open http://localhost:8000):
 
 ```bash
 uv run --no-project --python 3.12 --with jax --with xarray --with 'netCDF4<1.7.5' --with scipy --with matplotlib python -m stlnav.export_web
@@ -133,6 +142,10 @@ uv run --no-project --python 3.12 --with jax --with xarray --with 'netCDF4<1.7.5
 
 ```bash
 uv run --no-project --python 3.12 --with jax --with numpy python checks/stlnav_js.py
+```
+
+```bash
+node checks/field.js
 ```
 
 ```bash
@@ -154,6 +167,7 @@ a cusp of radius $R = C_l\, \ell\, (1 + C_v v_n)$ breaks off. Here $h$ is the ic
 | | Browser (`icebreaker-core.js`) | JAX (`icebreaker_jax.py`) |
 |---|---|---|
 | Continuous ice sheet | yes | yes |
+| Endless ice around the ship (`field`) | yes | no |
 | Separate floes, floe splitting | yes | no |
 | Broken pieces | rigid polygons | a grid of broken ice; its share under the hull scales the submersion resistance |
 

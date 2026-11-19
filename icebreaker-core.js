@@ -10,6 +10,9 @@
 //   * a finite floe splits when the in-plane force exceeds C_s h K_Ic sqrt(L);
 //   * broken pieces are rigid convex polygons; pieces under the hull add Lindqvist's
 //     submersion resistance.
+//
+// Scenarios 'level', 'floes' and 'pack' are fixed patches that the ship enters from open water. Scenario 'field' is endless: the ship
+// starts inside the ice, and ice is made ahead of it and dropped behind it as it goes (see `follow`).
 const IceSim = (() => {
   'use strict';
   const PI = Math.PI, TAU = 2 * PI, DEG = PI / 180;
@@ -840,6 +843,106 @@ const IceSim = (() => {
     sim.ship.x = 70; sim.ship.y = Y1 / 2;
   }
 
+  // ------------------------------------------------------------------ an endless field around the ship
+  // The world is cut into square chunks of CH metres. A chunk is made when the ship comes near and dropped when it is far away. What it
+  // holds is asked from field.at(x, y) -> { conc, h } at its centre: one fixed sheet of level ice (concentration of 0.895 or more), floes
+  // that cover that share of the water (down to 0.08), or nothing. Neighbouring sheets of level ice touch, so the ice is continuous;
+  // the only trace of the cut is that a cusp breaks a little more easily right at a chunk's border.
+  const CH = 256;
+  function floesIn(sim, X0, Y0, X1, Y1, conc, pack) {   // as buildFloes, in any rectangle and for any share of ice; the floes are larger, to keep their number down
+    const o = sim.o, rnd = sim.rand, leaves = [], amp = pack ? 3.2 : 6.5;
+    const cutTo = (poly, target, sink) => {
+      const pr = polyAC(poly), A = Math.abs(pr.area);
+      if (A < target * (0.7 + 0.9 * rnd())) { sink.push(poly); return; }
+      let bi = 0, bj = 1, bd = 0;
+      for (let i = 0; i < poly.length; i++) for (let j = i + 1; j < poly.length; j++) { const d = (poly[i][0] - poly[j][0]) ** 2 + (poly[i][1] - poly[j][1]) ** 2; if (d > bd) { bd = d; bi = i; bj = j; } }
+      const ang = Math.atan2(poly[bj][1] - poly[bi][1], poly[bj][0] - poly[bi][0]) + PI / 2 + (rnd() - 0.5) * 0.9;
+      const px = pr.cx + (rnd() - 0.5) * 0.25 * Math.sqrt(A), py = pr.cy + (rnd() - 0.5) * 0.25 * Math.sqrt(A), nx = -Math.sin(ang), ny = Math.cos(ang);
+      const a = clipHalf(poly, px, py, nx, ny), b = clipHalf(poly, px, py, -nx, -ny);
+      if (a.length < 3 || b.length < 3) { sink.push(poly); return; }
+      cutTo(a, target, sink); cutTo(b, target, sink);
+    };
+    const rect = [[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]], first = sim.sheets.length;
+    if (pack) { const reg = []; cutTo(rect, 14000, reg); for (const r of reg) cutTo(r, 700 * Math.pow(8, rnd()), leaves); } else cutTo(rect, 8500, leaves);
+    for (const leaf of leaves) {
+      const pr = polyAC(leaf), A = Math.abs(pr.area), s = Math.min(0.975, Math.sqrt(conc) * (0.95 + 0.1 * rnd()));   // each floe shrunk so that floes cover `conc` of the water
+      const poly = leaf.map(p => [pr.cx + (p[0] - pr.cx) * s, pr.cy + (p[1] - pr.cy) * s]);
+      if (A * s * s < o.minSheetArea * 1.3) { addPiece(sim, poly.map(p => p[0]), poly.map(p => p[1]), sim.P.h, 1); continue; }
+      sim.sheets.push(sheetFromPoly(sim, poly, pack ? 0.35 : 0.6, amp));
+    }
+    let brash = 0; const maxBrash = Math.round(24 * conc);      // small ice in the leads
+    for (const leaf of leaves) for (let i = 0; i < leaf.length && brash < maxBrash; i++) {
+      const a = leaf[i], b = leaf[(i + 1) % leaf.length], len = Math.hypot(b[0] - a[0], b[1] - a[1]), k = Math.floor(len / (pack ? 9 : 6) * rnd() * 1.4);
+      for (let q = 0; q < k && brash < maxBrash; q++) {
+        const t = rnd(), size = 0.5 + 1.6 * rnd() * rnd(), ex = a[0] + (b[0] - a[0]) * t, ey = a[1] + (b[1] - a[1]) * t; warpXY(sim, ex, ey, amp, T2);
+        const x = 2 * ex - T2[0] + (rnd() - 0.5) * 3, y = 2 * ey - T2[1] + (rnd() - 0.5) * 3; let ok = true;
+        for (let m = first; m < sim.sheets.length; m++) { const S = sim.sheets[m], dx = x - S.x, dy = y - S.y; if (dx * dx + dy * dy > S.R * S.R) continue; S.toLocal(x, y, T2); if (S.sample(T2[0], T2[1]) < size) { ok = false; break; } }
+        if (ok && randomPiece(sim, x, y, size)) brash++;
+      }
+    }
+  }
+  function makeChunk(sim, ci, cj) {
+    const f = sim.field, x0 = ci * CH, y0 = cj * CH, q = f.at(x0 + CH / 2, y0 + CH / 2), c = sim.o.cell;
+    const seed = (Math.imul(ci, 73856093) ^ Math.imul(cj, 19349663) ^ Math.imul(sim.o.seed, 83492791)) >>> 0;
+    if (!(q.conc >= 0.08) || !(q.h > 0.02)) return;
+    if (q.conc >= 0.895) {                      // level ice: a fixed sheet that fills the chunk
+      const n = Math.round(CH / c) + 1, S = new Sheet(n, n, c, q.h, sim.o.seed * 13 + 5);
+      S.sdf.fill(-50); S.fixed = true; S.x = x0; S.y = y0; S.hox = x0; S.hoy = y0; S.R = Math.hypot(CH, CH); S.area = CH * CH; sim.sheets.push(S); return;
+    }
+    const keep = sim.rand, h0 = sim.P.h; sim.rand = makeRng(seed); sim.P.h = q.h;
+    floesIn(sim, x0, y0, x0 + CH, y0 + CH, q.conc, f.pack);
+    sim.rand = keep; sim.P.h = h0;
+  }
+  // Keep the field around the ship: make the nearest missing chunk (all of them with `all`), and now and then drop what is far away.
+  // Call it once per frame; it costs nothing when there is nothing to do.
+  function follow(sim, all) {
+    const f = sim.field; if (!f) return;
+    const sh = sim.ship, R = f.radius;
+    // Level ice is kept within R of the ship. Floes are kept within a shorter distance, because each one is a body of its own.
+    const near = (ci, cj) => { const dx = Math.max(ci * CH - sh.x, 0, sh.x - (ci + 1) * CH), dy = Math.max(cj * CH - sh.y, 0, sh.y - (cj + 1) * CH); return Math.hypot(dx, dy); };
+    const solid = (ci, cj) => f.at((ci + 0.5) * CH, (cj + 0.5) * CH).conc >= 0.895;
+    for (;;) {
+      let best = null, bd = 1e18;
+      for (let cj = Math.floor((sh.y - R) / CH); cj <= Math.floor((sh.y + R) / CH); cj++) for (let ci = Math.floor((sh.x - R) / CH); ci <= Math.floor((sh.x + R) / CH); ci++) {
+        if (f.chunks.has(ci + ',' + cj)) continue; const d = near(ci, cj); if (d > (solid(ci, cj) ? R : f.floeRadius)) continue; if (d < bd) { bd = d; best = [ci, cj]; }
+      }
+      if (!best) break;
+      f.chunks.add(best[0] + ',' + best[1]); makeChunk(sim, best[0], best[1]);
+      if (!all) break;
+    }
+    if (sim.n - f.swept < 720) return;          // every two seconds of ship time
+    f.swept = sim.n; const gone = (x, y, lim) => { const dx = x - sh.x, dy = y - sh.y; return dx * dx + dy * dy > lim * lim; };
+    for (const S of sim.sheets) if (S.fixed ? gone(S.x + CH / 2, S.y + CH / 2, R + 1.1 * CH) : gone(S.x, S.y, f.floeRadius + 0.9 * CH)) { S.dead = true; sim.dirtySheets = true; }
+    for (const p of sim.pieces) if (gone(p.x, p.y, 460)) { p.dead = true; sim.dirtyPieces = true; }
+    for (const key of f.chunks) { const q = key.split(','), ci = +q[0], cj = +q[1]; if (near(ci, cj) > (solid(ci, cj) ? R + 0.6 * CH : f.floeRadius + 0.4 * CH)) f.chunks.delete(key); }
+    if (sim.dirtySheets) { sim.sheets = sim.sheets.filter(s => !s.dead); sim.dirtySheets = false; }
+    if (sim.dirtyPieces) { sim.pieces = sim.pieces.filter(p => !p.dead); sim.dirtyPieces = false; }
+  }
+  // The ship starts inside the ice as if it had been sailing through it: its own outline is cut out, a channel with ragged edges runs
+  // astern with brash in it, and broken ice lies under the hull (without it the first seconds would be too easy: see `cover`).
+  function seat(sim) {
+    const sh = sim.ship, o = sh.o, L = o.L, hb = o.B / 2, Lb = o.bowFrac * L, xb = L / 2, rnd = sim.rand, back = 380;
+    const half = x => (x > xb - Lb ? hb * (1 - Math.pow((x - (xb - Lb)) / Lb, o.bowPow)) : hb);
+    const cut = (x, y, R) => { for (const S of sim.sheets) { const dx = S.x - x, dy = S.y - y, rr = S.R + R; if (dx * dx + dy * dy > rr * rr) continue; S.toLocal(x, y, T2); S.carve(T2[0], T2[1], R, 0, 0, 0); if (S.im > 0) S.topo = true; } };
+    const here = sim.field.at(0, 0), ice = here.conc >= 0.08 && here.h > 0.02;
+    for (let x = -xb - back; x < xb; x += 1.5) cut(x, 0, (x < -xb ? hb + 1.2 : half(x) + 1.2));                       // the channel and the hull's own place
+    for (let x = -xb - back; x < xb - Lb; x += 2.4) for (const side of [-1, 1]) cut(x + 2 * rnd(), side * (hb + 0.4 + 1.8 * rnd()), 1.4 + 2.4 * rnd());   // cusps along its edges
+    if (!ice) return;
+    const share = Math.min(1, here.conc / 0.9);
+    for (let k = 0; k < 150 * share; k++) randomPiece(sim, -xb - back * rnd() * rnd(), (rnd() - 0.5) * 2 * (hb - 1), 0.6 + 1.5 * rnd() * rnd());   // brash in the channel
+    let area = 0; const want = 0.63 * sh.hull.area * share;
+    for (let k = 0; k < 400 && area < want; k++) {
+      const x = -xb + 3 + (L - 14) * rnd(), p = randomPiece(sim, x, (rnd() - 0.5) * 1.7 * half(x), 1.3 + 1.2 * rnd()); if (!p) continue;
+      p.sub = true; p.tSub = sim.t; area += p.area;
+    }
+    sim.cover = 0.9 * share;
+  }
+  function buildField(sim) {
+    const f = sim.o.field || {};
+    sim.field = { at: f.at || (() => ({ conc: 1, h: sim.P.h })), pack: f.pack !== false, radius: f.radius || 420, floeRadius: f.floeRadius || 190, chunks: new Set(), swept: 0 };
+    sim.ship.x = 0; sim.ship.y = 0; follow(sim, true); seat(sim);
+  }
+
   function create(opt) {
     const o = Object.assign({}, DEFAULTS, opt || {}); o.ship = Object.assign({}, DEFAULTS.ship, (opt && opt.ship) || {});
     const sim = {
@@ -851,8 +954,8 @@ const IceSim = (() => {
       proxy: { x: 0, y: 0, vx: 0, vy: 0, w: 0, im: 0, ii: 0 }, big: [], nAwake: 0, awake: new Uint8Array(64), sg: { on: false, lists: [], x0: 0, y0: 0, cell: 48, gw: 0, gh: 0 }, gcount: new Int32Array(1024), gitem: new Int32Array(1024), gcell: new Int32Array(1024), gfill: new Int32Array(1024),
     };
     sim.proxy.im = 1 / (1.2 * sim.ship.m); sim.proxy.ii = 1 / sim.ship.Izz;
-    if (o.scenario === 'level') buildLevel(sim); else buildFloes(sim, o.scenario === 'pack');
-    sim.ship.u = 4; sim.Rs0 = lindqvist(sim, sim.P.h, 0).Rs;
+    if (o.scenario === 'level') buildLevel(sim); else if (o.scenario === 'field') buildField(sim); else buildFloes(sim, o.scenario === 'pack');
+    sim.ship.u = o.u0 === undefined ? 4 : o.u0; sim.Rs0 = lindqvist(sim, sim.P.h, 0).Rs;
     return sim;
   }
 
@@ -862,6 +965,6 @@ const IceSim = (() => {
     for (const p of sim.pieces) { p.h = h; p.im *= f; p.ii *= f; }
   }
 
-  return { create, step, advance, lindqvist, setThickness, ellOf, vnoise, hash2, DEFAULTS };
+  return { create, step, advance, follow, lindqvist, setThickness, ellOf, vnoise, hash2, DEFAULTS, CH };
 })();
 if (typeof module !== 'undefined') module.exports = IceSim;

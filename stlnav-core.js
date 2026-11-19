@@ -229,6 +229,21 @@ const StlNav = (() => {
     return { arrived, collision: hit, aground, nearMisses: near, closestKm: closest, inTrack, speed: v, goalKm: d1, progressKm: d0 - d1, conc: here.conc, thick: here.thick, ve, vn, vGoal };
   }
 
+  // Advance the clock and the traffic while something else moves the own ship: in the page, the ice-breaking simulator when the view
+  // is close. The caller has already set s.lon, s.lat, s.th and s.v; ve and vn are the ship's velocity over the ground, m/s.
+  function follow(w, s, dt, ve, vn) {
+    const c = w.cfg, ts = s.traffic, own = w.classes[s.cls], kx = KY * Math.cos(s.lat * RAD); s.t += dt; s.facc = (s.facc || 0) + dt;
+    while (s.facc >= c.dt) { stepTraffic(w, ts, s.t, c.dt, [s.lon, s.lat, ve, vn], w.sigF, s.rng, s.departures); s.facc -= c.dt; }
+    let closest = Infinity, hit = false;
+    for (let i = 0; i < ts.n; i++) {
+      if (!ts.active[i]) continue; place(w, ts.route[i], ts.s[i], ts.off[i], PL);
+      const d = Math.hypot((PL[0] - s.lon) * kx, (PL[1] - s.lat) * KY); if (d < closest) closest = d;
+      if (d * 1e3 < 0.5 * (own.L + w.classes[ts.cls[i]].L) + c.hit_margin) hit = true;
+    }
+    const d1 = goal(s);
+    return { arrived: d1 < c.goal_km, collision: hit, aground: landAt(w, s.lon, s.lat) > 0.5, closestKm: closest, goalKm: d1 };
+  }
+
   // ------------------------------------------------------------------ a pilot for the page (stlnav has no counterpart: there the policy is what is learned)
   const dist = (lon, lat, q) => Math.hypot((q.lon - lon) * KY * Math.cos(lat * RAD), (q.lat - lat) * KY);
   // The route of voyage `index` as the ship will sail it: 1.5 km to the right of the line, clear of the ships that keep to it.
@@ -246,7 +261,7 @@ const StlNav = (() => {
   // starboard, so the own ship eases to port. Within 1 km of a ship the own ship also slows down.
   function pilot(w, s, nav, thr, opt) {
     const o = Object.assign({ avoid: true, clear: 1.2 }, opt || {}), own = w.classes[s.cls], dt = w.cfg.dt, last = nav.path.length - 1, ts = s.traffic;
-    nav.avoiding = false;
+    nav.avoiding = false; nav.tgt = nav.manual || nav.path[nav.k];
     if (o.avoid) {
       const cs = Math.cos(s.th), sn = Math.sin(s.th), kx = KY * Math.cos(s.lat * RAD); let risk = false, astern = false, near = Infinity;
       for (let i = 0; i < ts.n; i++) {
@@ -266,8 +281,8 @@ const StlNav = (() => {
       }
     }
     for (let pass = 0; pass < 4; pass++) {
-      const tgt = nav.manual || nav.path[nav.k], d = dist(s.lon, s.lat, tgt);
-      if (nav.manual && d < 2) {   // detour done: back to the route, at the nearest point still ahead
+      const tgt = nav.manual || nav.path[nav.k], d = dist(s.lon, s.lat, tgt); nav.tgt = tgt;
+      if (nav.manual && d < (nav.manual.reach || 2)) {   // detour done: back to the route, at the nearest point still ahead
         nav.manual = null; let j = nav.k; for (let q = nav.k; q <= last; q++) if (dist(s.lon, s.lat, nav.path[q]) < dist(s.lon, s.lat, nav.path[j])) j = q;
         nav.k = j < last && dist(s.lon, s.lat, nav.path[j + 1]) < dist(nav.path[j].lon, nav.path[j].lat, nav.path[j + 1]) ? j + 1 : j; continue;
       }
@@ -278,6 +293,6 @@ const StlNav = (() => {
     return [thr, 0];
   }
 
-  return { create, sample, landAt, lindqvist, attainableSpeed, iceResistance, windForce, place, newTraffic, resetTraffic, stepTraffic, reset, step, voyage, pilot, makeRng, typical, KY };
+  return { create, sample, landAt, lindqvist, attainableSpeed, iceResistance, windForce, place, newTraffic, resetTraffic, stepTraffic, reset, step, follow, voyage, pilot, makeRng, typical, KY };
 })();
 if (typeof module !== 'undefined') module.exports = StlNav;
