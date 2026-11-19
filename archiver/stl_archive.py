@@ -298,7 +298,10 @@ def main():
         summary["cis"] = st
         log(f"cis: {st}")
 
-    bad = [k for k, v in summary.items() if "error" in v or v.get("failed") or v.get("listed") == 0]
+    # A source that lists nothing is a problem, unless it was skipped whole because it is already archived
+    # (the water levels of a past day report listed=0, skip=1).
+    bad = [k for k, v in summary.items()
+           if "error" in v or v.get("failed") or (v.get("listed") == 0 and not v.get("skip"))]
     status = dict(finished=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
                   days=[str(d) for d in days], problems=bad, summary=summary)
     (root / "STATUS.json").write_text(json.dumps(status, indent=1))
