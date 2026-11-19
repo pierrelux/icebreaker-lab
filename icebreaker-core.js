@@ -396,7 +396,7 @@ const IceSim = (() => {
       T.sdf[j * nx + i] = v;
     }
     const ox = (c.i0 - pad) * S.cell, oy = (c.j0 - pad) * S.cell;
-    T.th = S.th; T.cs = S.cs; T.sn = S.sn; T.hvar = S.hvar; T.hox = S.hox + ox; T.hoy = S.hoy + oy; T.ridges = S.ridges;
+    T.th = S.th; T.cs = S.cs; T.sn = S.sn; T.hvar = S.hvar; T.hox = S.hox + ox; T.hoy = S.hoy + oy; T.ridges = S.ridges; T.home = S.home;
     S.toWorld(ox, oy, T2); T.x = T2[0]; T.y = T2[1];
     const rx = T.x - S.x, ry = T.y - S.y; T.vx = S.vx - S.w * ry; T.vy = S.vy + S.w * rx; T.w = S.w;
     T.recompute(sim.P);
@@ -767,27 +767,32 @@ const IceSim = (() => {
     return { area: A / 2, cx: cx / (3 * A), cy: cy / (3 * A) };
   }
   function warpXY(sim, x, y, amp, out) {   // one smooth displacement field shared by all floes, so neighbouring edges stay parallel
-    const ws = sim.o.seed * 7 + 100;
-    out[0] = x + amp * (vnoise(x / 46, y / 46, ws) + 0.22 * vnoise(x / 12, y / 12, ws + 2));
-    out[1] = y + amp * (vnoise(x / 46, y / 46, ws + 1) + 0.22 * vnoise(x / 12, y / 12, ws + 3));
+    const ws = sim.o.seed * 7 + 100, X = x + sim.gox, Y = y + sim.goy;   // gox, goy: where the simulator's origin lies in the endless field (0 elsewhere)
+    out[0] = x + amp * (vnoise(X / 46, Y / 46, ws) + 0.22 * vnoise(X / 12, Y / 12, ws + 2));
+    out[1] = y + amp * (vnoise(X / 46, Y / 46, ws + 1) + 0.22 * vnoise(X / 12, Y / 12, ws + 3));
   }
-  function sheetFromPoly(sim, poly, rough, amp) {
+  function sheetFromPoly(sim, poly, rough, amp, seed) {
     const o = sim.o, c = o.cell, pr = polyAC(poly); if (pr.area < 0) poly = poly.slice().reverse();
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const p of poly) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
     const pad = 3 * c + 2 * rough + 1.3 * amp, ox = x0 - pad, oy = y0 - pad, nx = Math.ceil((x1 - x0 + 2 * pad) / c) + 1, ny = Math.ceil((y1 - y0 + 2 * pad) / c) + 1;
-    const S = new Sheet(nx, ny, c, sim.P.h, (sim.rand() * 1e6) | 0), E = [], raw = new Float32Array(nx * ny);
+    const S = new Sheet(nx, ny, c, sim.P.h, seed === undefined ? (sim.rand() * 1e6) | 0 : seed), E = [], raw = new Float32Array(nx * ny), gx = sim.gox, gy = sim.goy;
     for (let i = 0; i < poly.length; i++) { const a = poly[i], b = poly[(i + 1) % poly.length], ex = b[0] - a[0], ey = b[1] - a[1], l = Math.hypot(ex, ey) || 1; E.push(ey / l, -ex / l, (ey * a[0] - ex * a[1]) / l); }
+    const wg = sim.field ? fieldWarpGrid(sim.o.seed, ox + gx, oy + gy, ox + gx + (nx - 1) * c, oy + gy + (ny - 1) * c, 4) : null;   // the endless field reads the displacement between the nodes of a coarse lattice, as whoever draws its far ice does
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-      warpXY(sim, ox + i * c, oy + j * c, amp, T2); const x = T2[0], y = T2[1]; let d = -1e9;
+      if (wg) {
+        const fx0 = i * c / wg.step, fy0 = j * c / wg.step, i0 = fx0 | 0, j0 = fy0 | 0, fx = fx0 - i0, fy = fy0 - j0, q = j0 * wg.nx + i0, w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+        T2[0] = ox + i * c + wg.dx[q] * w00 + wg.dx[q + 1] * w10 + wg.dx[q + wg.nx] * w01 + wg.dx[q + wg.nx + 1] * w11; T2[1] = oy + j * c + wg.dy[q] * w00 + wg.dy[q + 1] * w10 + wg.dy[q + wg.nx] * w01 + wg.dy[q + wg.nx + 1] * w11;
+      } else warpXY(sim, ox + i * c, oy + j * c, amp, T2);
+      const x = T2[0], y = T2[1]; let d = -1e9;
       for (let e = 0; e < E.length; e += 3) { const v = E[e] * x + E[e + 1] * y - E[e + 2]; if (v > d) d = v; }
-      raw[j * nx + i] = d + rough * (vnoise(x / 9, y / 9, S.seed) + 0.4 * vnoise(x / 3.3, y / 3.3, S.seed + 1));
+      raw[j * nx + i] = d + rough * (vnoise((x + gx) / 9, (y + gy) / 9, S.seed) + 0.4 * vnoise((x + gx) / 3.3, (y + gy) / 3.3, S.seed + 1));
     }
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {     // the warp stretches distances: divide by the local slope
       const k = j * nx + i, i0 = i > 0 ? k - 1 : k, i1 = i < nx - 1 ? k + 1 : k, j0 = j > 0 ? k - nx : k, j1 = j < ny - 1 ? k + nx : k;
       const gx = (raw[i1] - raw[i0]) / ((i1 - i0) * c), gy = (raw[j1] - raw[j0]) / ((j1 - j0) / nx * c), g = Math.hypot(gx, gy);
       S.sdf[k] = raw[k] / clamp(g, 0.5, 2);
     }
-    S.x = ox; S.y = oy; S.hox = ox; S.hoy = oy; S.recompute(sim.P);
+    S.x = ox; S.y = oy; S.hox = ox + gx; S.hoy = oy + gy; S.recompute(sim.P);
     return S;
   }
   function randomPiece(sim, x, y, size) {
@@ -844,67 +849,140 @@ const IceSim = (() => {
   }
 
   // ------------------------------------------------------------------ an endless field around the ship
-  // The world is cut into square chunks of CH metres. A chunk is made when the ship comes near and dropped when it is far away. What it
-  // holds is asked from field.at(x, y) -> { conc, h } at its centre: one fixed sheet of level ice (concentration of 0.895 or more), floes
-  // that cover that share of the water (down to 0.08), or nothing. Neighbouring sheets of level ice touch, so the ice is continuous;
-  // the only trace of the cut is that a cusp breaks a little more easily right at a chunk's border.
-  const CH = 256;
-  function floesIn(sim, X0, Y0, X1, Y1, conc, pack) {   // as buildFloes, in any rectangle and for any share of ice; the floes are larger, to keep their number down
-    const o = sim.o, rnd = sim.rand, leaves = [], amp = pack ? 3.2 : 6.5;
-    const cutTo = (poly, target, sink) => {
-      const pr = polyAC(poly), A = Math.abs(pr.area);
-      if (A < target * (0.7 + 0.9 * rnd())) { sink.push(poly); return; }
-      let bi = 0, bj = 1, bd = 0;
-      for (let i = 0; i < poly.length; i++) for (let j = i + 1; j < poly.length; j++) { const d = (poly[i][0] - poly[j][0]) ** 2 + (poly[i][1] - poly[j][1]) ** 2; if (d > bd) { bd = d; bi = i; bj = j; } }
-      const ang = Math.atan2(poly[bj][1] - poly[bi][1], poly[bj][0] - poly[bi][0]) + PI / 2 + (rnd() - 0.5) * 0.9;
-      const px = pr.cx + (rnd() - 0.5) * 0.25 * Math.sqrt(A), py = pr.cy + (rnd() - 0.5) * 0.25 * Math.sqrt(A), nx = -Math.sin(ang), ny = Math.cos(ang);
-      const a = clipHalf(poly, px, py, nx, ny), b = clipHalf(poly, px, py, -nx, -ny);
-      if (a.length < 3 || b.length < 3) { sink.push(poly); return; }
-      cutTo(a, target, sink); cutTo(b, target, sink);
-    };
-    const rect = [[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]], first = sim.sheets.length;
-    if (pack) { const reg = []; cutTo(rect, 14000, reg); for (const r of reg) cutTo(r, 700 * Math.pow(8, rnd()), leaves); } else cutTo(rect, 8500, leaves);
-    for (const leaf of leaves) {
-      const pr = polyAC(leaf), A = Math.abs(pr.area), s = Math.min(0.975, Math.sqrt(conc) * (0.95 + 0.1 * rnd()));   // each floe shrunk so that floes cover `conc` of the water
-      const poly = leaf.map(p => [pr.cx + (p[0] - pr.cx) * s, pr.cy + (p[1] - pr.cy) * s]);
-      if (A * s * s < o.minSheetArea * 1.3) { addPiece(sim, poly.map(p => p[0]), poly.map(p => p[1]), sim.P.h, 1); continue; }
-      sim.sheets.push(sheetFromPoly(sim, poly, pack ? 0.35 : 0.6, amp));
+  // The ice is one pattern laid over an endless plane, the same wherever and whenever it is asked for. The plane carries a lattice of
+  // FA metres with one site per cell, placed at random inside it. Each site owns the ground nearer to it than to any other site (its
+  // cell), and what stands there is asked from at(X, Y) -> { conc, h } at the site:
+  //   concentration of F_LEVEL or more  level ice over the whole cell; neighbouring cells of level ice make one sheet;
+  //   down to F_MIN                     a floe: the cell shrunk about its site. Not every cell has one, the floes differ in size, and
+  //                                     the ice is denser in some patches than in others; over a few hundred metres the floes cover
+  //                                     the share of the water that was asked for;
+  //   less, or no thickness             open water.
+  // Edges are bent by the same smooth displacement as the floes of the other scenarios, and roughened in the same way.
+  //
+  // Around the ship the pattern becomes bodies that break and move. The plane is cut into square chunks of CH metres; a chunk is made
+  // when the ship comes near and dropped when it is far away. It holds the floes whose sites lie in it and, if any of its ground is
+  // level ice, one fixed sheet. Neighbouring sheets touch, so level ice is continuous; the only trace of the cut is that a cusp breaks
+  // a little more easily right at a chunk's border. Beyond the chunks nothing is simulated, but whoever draws the field can ask for
+  // the very same pattern with fieldGrid and fieldDist, and so show ice that joins the bodies without a seam.
+  const CH = 256, FA = 40, F_ROUGH = 0.35, F_AMP = 3.2, F_LEVEL = 0.895, F_MIN = 0.08, F_JIT = 0.94;
+  const SITE = { x: 0, y: 0, r: 0, r2: 0, seed: 0 }, FD = { k: 0, kind: 0 };
+  function fieldSite(seed, I, J, out) {   // the site of lattice cell (I, J), a number for its floe's size and the seed of its floe
+    out.x = (I + 0.5 + F_JIT * (hash2(I, J, seed + 21) - 0.5)) * FA; out.y = (J + 0.5 + F_JIT * (hash2(I, J, seed + 22) - 0.5)) * FA;
+    out.r = hash2(I, J, seed + 23); out.r2 = hash2(I, J, seed + 25); out.seed = (hash2(I, J, seed + 24) * 1e6) | 0; return out;
+  }
+  // The scale of the floe at a site (0: none), for a share `conc` of ice there. r, r2: the site's two random numbers.
+  function fieldScale(seed, x, y, conc, r, r2) {
+    const local = clamp(conc * (1 + 0.5 * vnoise(x / 170, y / 170, seed + 31)), 0.03, 0.93);       // patches of denser and looser ice
+    const share = clamp(local / 0.5, 0.35, 1); if (r2 >= share) return 0;                             // loose ice: fewer floes, not smaller ones
+    const spread = 0.25 * clamp((0.95 - local) / 0.3, 0, 1);                                          // sizes differ, less so where the floes fill their cells
+    return Math.min(0.975, Math.sqrt(local / share) * (1 + spread * (2 * r - 1)));
+  }
+  function fieldWarp(seed, X, Y, out) {   // where the pattern is read for the point (X, Y) of the plane
+    const ws = seed * 7 + 100;
+    out[0] = X + F_AMP * (vnoise(X / 46, Y / 46, ws) + 0.22 * vnoise(X / 12, Y / 12, ws + 2));
+    out[1] = Y + F_AMP * (vnoise(X / 46, Y / 46, ws + 1) + 0.22 * vnoise(X / 12, Y / 12, ws + 3));
+  }
+  // The sites of nI x nJ lattice cells from (I0, J0), what each holds (kind 0 nothing, 1 a floe of scale s, 2 level ice), and for
+  // every site the lines half-way to its 24 neighbours (unit vector towards the neighbour, and half the distance).
+  // Sites less than two cells from the edge of the block have no such lines: ask only about points three cells or more inside.
+  function fieldGrid(seed, at, I0, J0, nI, nJ) {
+    const n = nI * nJ, G = { I0, J0, nI, nJ, x: new Float64Array(n), y: new Float64Array(n), s: new Float32Array(n), h: new Float32Array(n), kind: new Uint8Array(n), seed: new Int32Array(n),
+      nbx: new Float32Array(24 * n), nby: new Float32Array(24 * n), nbh: new Float32Array(24 * n), off: new Int32Array(24), level: 0, floes: 0 };
+    for (let j = 0; j < nJ; j++) for (let i = 0; i < nI; i++) {
+      const k = j * nI + i; fieldSite(seed, I0 + i, J0 + j, SITE); const q = at(SITE.x, SITE.y), ice = q.conc >= F_MIN && q.h > 0.02;
+      G.x[k] = SITE.x; G.y[k] = SITE.y; G.seed[k] = SITE.seed; G.h[k] = q.h; G.kind[k] = !ice ? 0 : q.conc >= F_LEVEL ? 2 : 1; G.s[k] = 1;
+      if (G.kind[k] === 1) { const sc = fieldScale(seed, SITE.x, SITE.y, q.conc, SITE.r, SITE.r2); if (sc > 0) G.s[k] = sc; else G.kind[k] = 0; }
+      if (G.kind[k] === 2) G.level++; else if (G.kind[k] === 1) G.floes++;
     }
-    let brash = 0; const maxBrash = Math.round(24 * conc);      // small ice in the leads
-    for (const leaf of leaves) for (let i = 0; i < leaf.length && brash < maxBrash; i++) {
-      const a = leaf[i], b = leaf[(i + 1) % leaf.length], len = Math.hypot(b[0] - a[0], b[1] - a[1]), k = Math.floor(len / (pack ? 9 : 6) * rnd() * 1.4);
-      for (let q = 0; q < k && brash < maxBrash; q++) {
-        const t = rnd(), size = 0.5 + 1.6 * rnd() * rnd(), ex = a[0] + (b[0] - a[0]) * t, ey = a[1] + (b[1] - a[1]) * t; warpXY(sim, ex, ey, amp, T2);
-        const x = 2 * ex - T2[0] + (rnd() - 0.5) * 3, y = 2 * ey - T2[1] + (rnd() - 0.5) * 3; let ok = true;
-        for (let m = first; m < sim.sheets.length; m++) { const S = sim.sheets[m], dx = x - S.x, dy = y - S.y; if (dx * dx + dy * dy > S.R * S.R) continue; S.toLocal(x, y, T2); if (S.sample(T2[0], T2[1]) < size) { ok = false; break; } }
-        if (ok && randomPiece(sim, x, y, size)) brash++;
-      }
+    let m = 0; for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) if (di || dj) G.off[m++] = dj * nI + di;
+    for (let j = 2; j < nJ - 2; j++) for (let i = 2; i < nI - 2; i++) {
+      const k = j * nI + i, o = 24 * k;
+      for (let q = 0; q < 24; q++) { const e = k + G.off[q], ex = G.x[e] - G.x[k], ey = G.y[e] - G.y[k], l = Math.sqrt(ex * ex + ey * ey); G.nbx[o + q] = ex / l; G.nby[o + q] = ey / l; G.nbh[o + q] = 0.5 * l; }
     }
+    return G;
+  }
+  // Distance (m, negative inside) from the point (wx, wy), already displaced by fieldWarp, to the edge of the ice that holds it; FD.k
+  // is then the site that owns the point and FD.kind what stands at the point (0 water, 1 a floe, 2 level ice). In water the distance
+  // is to the nearest level ice (50 if none is near): floes do not reach out of their own cells. With levelOnly, floes count as water.
+  function fieldDist(G, wx, wy, levelOnly) {
+    const nI = G.nI, ci = Math.floor(wx / FA) - G.I0, cj = Math.floor(wy / FA) - G.J0, X = G.x, Y = G.y; let best = 1e30, k = 0;
+    for (let dj = -1; dj <= 1; dj++) { const row = (cj + dj) * nI + ci; for (let q = row - 1; q <= row + 1; q++) { const dx = wx - X[q], dy = wy - Y[q], d2 = dx * dx + dy * dy; if (d2 < best) { best = d2; k = q; } } }
+    const kind = G.kind[k], rx = wx - X[k], ry = wy - Y[k], o = 24 * k, nbx = G.nbx, nby = G.nby, nbh = G.nbh; FD.k = k;
+    if (kind === 1 && !levelOnly) { const s = G.s[k]; let d = -1e9; for (let q = 0; q < 24; q++) { const v = rx * nbx[o + q] + ry * nby[o + q] - s * nbh[o + q]; if (v > d) d = v; } FD.kind = d < 0 ? 1 : 0; return d; }
+    const kd = G.kind, off = G.off;
+    if (kind === 2) { let d = -50; for (let q = 0; q < 24; q++) if (kd[k + off[q]] !== 2) { const v = rx * nbx[o + q] + ry * nby[o + q] - nbh[o + q]; if (v > d) d = v; } FD.kind = 2; return d; }
+    let d = 50; for (let q = 0; q < 24; q++) if (kd[k + off[q]] === 2) { const v = nbh[o + q] - rx * nbx[o + q] - ry * nby[o + q]; if (v < d) d = v; } FD.kind = 0; return d;
+  }
+  function fieldCell(G, k, s) {   // the cell of site k shrunk about the site by s, as a polygon (s = 1: the whole cell)
+    const cx = G.x[k], cy = G.y[k], R = 2.6 * FA, o = 24 * k; let poly = [[cx - R, cy - R], [cx + R, cy - R], [cx + R, cy + R], [cx - R, cy + R]];
+    for (let q = 0; q < 24 && poly.length >= 3; q++) { const nx = G.nbx[o + q], ny = G.nby[o + q], d = s * G.nbh[o + q]; poly = clipHalf(poly, cx + nx * d, cy + ny * d, nx, ny); }
+    return poly;
+  }
+  // The displacement of fieldWarp on a coarse lattice (it is smooth), to be read between its nodes: {x0, y0, step, nx, dx, dy}.
+  function fieldWarpGrid(seed, X0, Y0, X1, Y1, step) {
+    const nx = Math.ceil((X1 - X0) / step) + 2, ny = Math.ceil((Y1 - Y0) / step) + 2, dx = new Float32Array(nx * ny), dy = new Float32Array(nx * ny);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const X = X0 + i * step, Y = Y0 + j * step; fieldWarp(seed, X, Y, T2); dx[j * nx + i] = T2[0] - X; dy[j * nx + i] = T2[1] - Y; }
+    return { x0: X0, y0: Y0, step, nx, ny, dx, dy };
   }
   function makeChunk(sim, ci, cj) {
-    const f = sim.field, x0 = ci * CH, y0 = cj * CH, q = f.at(x0 + CH / 2, y0 + CH / 2), c = sim.o.cell;
-    const seed = (Math.imul(ci, 73856093) ^ Math.imul(cj, 19349663) ^ Math.imul(sim.o.seed, 83492791)) >>> 0;
-    if (!(q.conc >= 0.08) || !(q.h > 0.02)) return;
-    if (q.conc >= 0.895) {                      // level ice: a fixed sheet that fills the chunk
-      const n = Math.round(CH / c) + 1, S = new Sheet(n, n, c, q.h, sim.o.seed * 13 + 5);
-      S.sdf.fill(-50); S.fixed = true; S.x = x0; S.y = y0; S.hox = x0; S.hoy = y0; S.R = Math.hypot(CH, CH); S.area = CH * CH; sim.sheets.push(S); return;
+    const f = sim.field, o = sim.o, c = o.cell, key = ci + ',' + cj, ox = sim.gox, oy = sim.goy, X0 = ci * CH + ox, Y0 = cj * CH + oy;
+    const I0 = Math.floor(X0 / FA) - 4, J0 = Math.floor(Y0 / FA) - 4, nI = Math.floor((X0 + CH) / FA) + 5 - I0, nJ = Math.floor((Y0 + CH) / FA) + 5 - J0;
+    const G = fieldGrid(o.seed, (X, Y) => f.at(X - ox, Y - oy), I0, J0, nI, nJ), cells = [], first = sim.sheets.length, h0 = sim.P.h;
+    for (let j = 2; j < nJ - 2; j++) for (let i = 2; i < nI - 2; i++) {
+      const k = j * nI + i; if (G.x[k] < X0 || G.x[k] >= X0 + CH || G.y[k] < Y0 || G.y[k] >= Y0 + CH) continue;
+      if (G.kind[k] !== 2) cells.push(fieldCell(G, k, 1).map(p => [p[0] - ox, p[1] - oy])); if (G.kind[k] !== 1) continue;
+      const poly = fieldCell(G, k, G.s[k]).map(p => [p[0] - ox, p[1] - oy]); if (poly.length < 3) continue;
+      sim.P.h = G.h[k];
+      if (Math.abs(polyAC(poly).area) < o.minSheetArea * 1.3) { const p = addPiece(sim, poly.map(q => q[0]), poly.map(q => q[1]), G.h[k], 1); if (p) p.home = key; }
+      else { const S = sheetFromPoly(sim, poly, F_ROUGH, F_AMP, G.seed[k]); S.home = key; sim.sheets.push(S); }
     }
-    const keep = sim.rand, h0 = sim.P.h; sim.rand = makeRng(seed); sim.P.h = q.h;
-    floesIn(sim, x0, y0, x0 + CH, y0 + CH, q.conc, f.pack);
-    sim.rand = keep; sim.P.h = h0;
+    sim.P.h = h0;
+    let level = 0, all = 0, sheet = null;       // level ice anywhere near the chunk's own ground?
+    for (let j = 1; j < nJ - 1; j++) for (let i = 1; i < nI - 1; i++) { all++; if (G.kind[j * nI + i] === 2) level++; }
+    if (level) {
+      const n = Math.round(CH / c) + 1, S = new Sheet(n, n, c, f.at(ci * CH + CH / 2, cj * CH + CH / 2).h || sim.P.h, o.seed * 13 + 5), sd = S.sdf;
+      if (level === all) sd.fill(-50);
+      else {
+        const wg = fieldWarpGrid(o.seed, X0, Y0, X0 + CH, Y0 + CH, 4), ws = 1 / wg.step, ls = S.seed; let any = false;
+        for (let j = 0; j < n; j++) {
+          const Y = Y0 + j * c, gy = (Y - wg.y0) * ws, j0 = gy | 0, fy = gy - j0;
+          for (let i = 0; i < n; i++) {
+            const X = X0 + i * c, gx = (X - wg.x0) * ws, i0 = gx | 0, fx = gx - i0, q = j0 * wg.nx + i0, w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+            const wx = X + wg.dx[q] * w00 + wg.dx[q + 1] * w10 + wg.dx[q + wg.nx] * w01 + wg.dx[q + wg.nx + 1] * w11, wy = Y + wg.dy[q] * w00 + wg.dy[q + 1] * w10 + wg.dy[q + wg.nx] * w01 + wg.dy[q + wg.nx + 1] * w11;
+            let d = fieldDist(G, wx, wy, true); if (d > -3 && d < 3) d += F_ROUGH * (vnoise(wx / 9, wy / 9, ls) + 0.4 * vnoise(wx / 3.3, wy / 3.3, ls + 1));
+            sd[j * n + i] = d; if (d < 0) any = true;
+          }
+        }
+        if (!any) level = 0;
+      }
+      if (level) { S.fixed = true; S.x = ci * CH; S.y = cj * CH; S.hox = X0; S.hoy = Y0; S.R = Math.hypot(CH, CH); S.area = CH * CH; S.home = key; sim.sheets.push(S); }
+      if (level === all) sheet = 'all';
+      else if (level) {   // the cells of level ice that reach into the chunk, whichever chunk their sites are in
+        sheet = []; const m = 1.6 * FA;
+        for (let j = 2; j < nJ - 2; j++) for (let i = 2; i < nI - 2; i++) { const k = j * nI + i; if (G.kind[k] === 2 && G.x[k] > X0 - m && G.x[k] < X0 + CH + m && G.y[k] > Y0 - m && G.y[k] < Y0 + CH + m) sheet.push(fieldCell(G, k, 1).map(p => [p[0] - ox, p[1] - oy])); }
+      }
+    }
+    for (let m = first; m < sim.sheets.length; m++) {   // the channel the ship lay in when the field was made runs through chunks made later, too
+      const S = sim.sheets[m]; for (const q of f.cuts) { const dx = S.x - q[0], dy = S.y - q[1], rr = S.R + q[2]; if (dx * dx + dy * dy > rr * rr) continue; S.toLocal(q[0], q[1], T2); S.carve(T2[0], T2[1], q[2], 0, 0, 0); if (S.im > 0) S.topo = true; }
+    }
+    f.cells.set(key, { x: ci * CH, y: cj * CH, cells, sheet }); f.rev++;
   }
-  // Keep the field around the ship: make the nearest missing chunk (all of them with `all`), and now and then drop what is far away.
-  // Call it once per frame; it costs nothing when there is nothing to do.
+  // Keep the field around the ship: make the nearest missing chunk (with `all`: all of them, or all within that many metres), and now and
+  // then drop what is far away.
+  // Call it once per frame; it costs nothing when there is nothing to do. A chunk is dropped whole, with every floe that started in it,
+  // so that field.cells tells at every moment which ground has its ice alive: for each chunk, the cells of its sites that hold a floe
+  // or open water (`cells`), and the level ice inside the chunk's square (`sheet`: 'all' of the square, or the cells of level ice that
+  // reach into it, or null).
   function follow(sim, all) {
     const f = sim.field; if (!f) return;
     const sh = sim.ship, R = f.radius;
     // Level ice is kept within R of the ship. Floes are kept within a shorter distance, because each one is a body of its own.
     const near = (ci, cj) => { const dx = Math.max(ci * CH - sh.x, 0, sh.x - (ci + 1) * CH), dy = Math.max(cj * CH - sh.y, 0, sh.y - (cj + 1) * CH); return Math.hypot(dx, dy); };
-    const solid = (ci, cj) => f.at((ci + 0.5) * CH, (cj + 0.5) * CH).conc >= 0.895;
+    const solid = (ci, cj) => f.at((ci + 0.5) * CH, (cj + 0.5) * CH).conc >= F_LEVEL;
     for (;;) {
       let best = null, bd = 1e18;
       for (let cj = Math.floor((sh.y - R) / CH); cj <= Math.floor((sh.y + R) / CH); cj++) for (let ci = Math.floor((sh.x - R) / CH); ci <= Math.floor((sh.x + R) / CH); ci++) {
-        if (f.chunks.has(ci + ',' + cj)) continue; const d = near(ci, cj); if (d > (solid(ci, cj) ? R : f.floeRadius)) continue; if (d < bd) { bd = d; best = [ci, cj]; }
+        if (f.chunks.has(ci + ',' + cj)) continue; const d = near(ci, cj); if (d > (solid(ci, cj) ? R : f.floeRadius) || (all > 1 && d > all)) continue; if (d < bd) { bd = d; best = [ci, cj]; }
       }
       if (!best) break;
       f.chunks.add(best[0] + ',' + best[1]); makeChunk(sim, best[0], best[1]);
@@ -912,35 +990,43 @@ const IceSim = (() => {
     }
     if (sim.n - f.swept < 720) return;          // every two seconds of ship time
     f.swept = sim.n; const gone = (x, y, lim) => { const dx = x - sh.x, dy = y - sh.y; return dx * dx + dy * dy > lim * lim; };
-    for (const S of sim.sheets) if (S.fixed ? gone(S.x + CH / 2, S.y + CH / 2, R + 1.1 * CH) : gone(S.x, S.y, f.floeRadius + 0.9 * CH)) { S.dead = true; sim.dirtySheets = true; }
-    for (const p of sim.pieces) if (gone(p.x, p.y, 460)) { p.dead = true; sim.dirtyPieces = true; }
-    for (const key of f.chunks) { const q = key.split(','), ci = +q[0], cj = +q[1]; if (near(ci, cj) > (solid(ci, cj) ? R + 0.6 * CH : f.floeRadius + 0.4 * CH)) f.chunks.delete(key); }
+    let dropped = null;
+    for (const key of f.chunks) { const q = key.split(','), ci = +q[0], cj = +q[1]; if (near(ci, cj) > (solid(ci, cj) ? R + 0.6 * CH : f.floeRadius + 0.4 * CH)) { f.chunks.delete(key); f.cells.delete(key); (dropped || (dropped = new Set())).add(key); f.rev++; } }
+    if (dropped) {
+      for (const S of sim.sheets) if (dropped.has(S.home)) { S.dead = true; sim.dirtySheets = true; }
+      for (const p of sim.pieces) if (dropped.has(p.home)) { p.dead = true; sim.dirtyPieces = true; }
+    }
+    for (const p of sim.pieces) if (p.home === undefined && gone(p.x, p.y, 460)) { p.dead = true; sim.dirtyPieces = true; }      // what the ship broke off
     if (sim.dirtySheets) { sim.sheets = sim.sheets.filter(s => !s.dead); sim.dirtySheets = false; }
     if (sim.dirtyPieces) { sim.pieces = sim.pieces.filter(p => !p.dead); sim.dirtyPieces = false; }
   }
   // The ship starts inside the ice as if it had been sailing through it: its own outline is cut out, a channel with ragged edges runs
   // astern with brash in it, and broken ice lies under the hull (without it the first seconds would be too easy: see `cover`).
   function seat(sim) {
-    const sh = sim.ship, o = sh.o, L = o.L, hb = o.B / 2, Lb = o.bowFrac * L, xb = L / 2, rnd = sim.rand, back = 380;
+    const sh = sim.ship, o = sh.o, L = o.L, hb = o.B / 2, Lb = o.bowFrac * L, xb = L / 2, rnd = sim.rand, back = 380, cs = Math.cos(sh.th), sn = Math.sin(sh.th);
     const half = x => (x > xb - Lb ? hb * (1 - Math.pow((x - (xb - Lb)) / Lb, o.bowPow)) : hb);
-    const cut = (x, y, R) => { for (const S of sim.sheets) { const dx = S.x - x, dy = S.y - y, rr = S.R + R; if (dx * dx + dy * dy > rr * rr) continue; S.toLocal(x, y, T2); S.carve(T2[0], T2[1], R, 0, 0, 0); if (S.im > 0) S.topo = true; } };
-    const here = sim.field.at(0, 0), ice = here.conc >= 0.08 && here.h > 0.02;
+    const wx = (x, y) => sh.x + cs * x - sn * y, wy = (x, y) => sh.y + sn * x + cs * y;                              // from the ship's own axes (x ahead) to the simulator's
+    const cut = (x, y, R) => { const X = wx(x, y), Y = wy(x, y); sim.field.cuts.push([X, Y, R]); for (const S of sim.sheets) { const dx = S.x - X, dy = S.y - Y, rr = S.R + R; if (dx * dx + dy * dy > rr * rr) continue; S.toLocal(X, Y, T2); S.carve(T2[0], T2[1], R, 0, 0, 0); if (S.im > 0) S.topo = true; } };
+    const here = sim.field.at(sh.x, sh.y), ice = here.conc >= F_MIN && here.h > 0.02;
     for (let x = -xb - back; x < xb; x += 1.5) cut(x, 0, (x < -xb ? hb + 1.2 : half(x) + 1.2));                       // the channel and the hull's own place
     for (let x = -xb - back; x < xb - Lb; x += 2.4) for (const side of [-1, 1]) cut(x + 2 * rnd(), side * (hb + 0.4 + 1.8 * rnd()), 1.4 + 2.4 * rnd());   // cusps along its edges
     if (!ice) return;
     const share = Math.min(1, here.conc / 0.9);
-    for (let k = 0; k < 150 * share; k++) randomPiece(sim, -xb - back * rnd() * rnd(), (rnd() - 0.5) * 2 * (hb - 1), 0.6 + 1.5 * rnd() * rnd());   // brash in the channel
+    for (let k = 0; k < 150 * share; k++) { const x = -xb - back * rnd() * rnd(), y = (rnd() - 0.5) * 2 * (hb - 1); randomPiece(sim, wx(x, y), wy(x, y), 0.6 + 1.5 * rnd() * rnd()); }   // brash in the channel
     let area = 0; const want = 0.63 * sh.hull.area * share;
     for (let k = 0; k < 400 && area < want; k++) {
-      const x = -xb + 3 + (L - 14) * rnd(), p = randomPiece(sim, x, (rnd() - 0.5) * 1.7 * half(x), 1.3 + 1.2 * rnd()); if (!p) continue;
+      const x = -xb + 3 + (L - 14) * rnd(), y = (rnd() - 0.5) * 1.7 * half(x), p = randomPiece(sim, wx(x, y), wy(x, y), 1.3 + 1.2 * rnd()); if (!p) continue;
       p.sub = true; p.tSub = sim.t; area += p.area;
     }
     sim.cover = 0.9 * share;
   }
+  // field: { at(x, y) -> { conc, h } in the simulator's own metres, origin: [X, Y] of the simulator's origin in the endless plane (a whole
+  // number of chunks; default 0, 0), radius, floeRadius }. The ship starts at (o.x0, o.y0) heading o.th0 (radians, default 0).
   function buildField(sim) {
-    const f = sim.o.field || {};
-    sim.field = { at: f.at || (() => ({ conc: 1, h: sim.P.h })), pack: f.pack !== false, radius: f.radius || 420, floeRadius: f.floeRadius || 190, chunks: new Set(), swept: 0 };
-    sim.ship.x = 0; sim.ship.y = 0; follow(sim, true); seat(sim);
+    const f = sim.o.field || {}, og = f.origin || [0, 0];
+    sim.gox = Math.round(og[0] / CH) * CH; sim.goy = Math.round(og[1] / CH) * CH;
+    sim.field = { at: f.at || (() => ({ conc: 1, h: sim.P.h })), radius: f.radius || 420, floeRadius: f.floeRadius || 190, chunks: new Set(), cells: new Map(), cuts: [], rev: 0, swept: 0 };
+    sim.ship.x = sim.o.x0 || 0; sim.ship.y = sim.o.y0 || 0; sim.ship.th = sim.o.th0 || 0; sim.ap.heading = sim.ship.th; follow(sim, f.first || true); seat(sim);   // f.first: make only the chunks within that many metres now, and the others one per call of `follow`
   }
 
   function create(opt) {
@@ -948,7 +1034,7 @@ const IceSim = (() => {
     const sim = {
       o, P: { h: o.h, sigF: o.sigF, sigC: o.sigC, mu: o.mu, E: o.E, nu: o.nu, rhoW: o.rhoW, rhoI: o.rhoI, g: o.g, KIc: o.KIc, Cf: o.Cf, Cl: o.Cl, Cv: o.Cv, Csplit: o.Csplit },
       dt: o.dt, t: 0, n: 0, acc: 0, rand: makeRng(o.seed), ship: makeShip(o.ship), sheets: [], pieces: [], pending: [], events: [],
-      FX: 0, FY: 0, MZ: 0, accX: 0, accN: 0, subArea: 0, cover: 0, Rs0: 0, dirtySheets: false, dirtyPieces: false,
+      FX: 0, FY: 0, MZ: 0, accX: 0, accN: 0, subArea: 0, cover: 0, Rs0: 0, dirtySheets: false, dirtyPieces: false, gox: 0, goy: 0,
       ap: { on: true, heading: 0, hasTarget: false, tx: 0, ty: 0 }, stats: { cusps: 0, splits: 0 },
       Z: { len: 0, k: -1, max: 0, fv: 0, fh: 0, w: 0, x: 0, y: 0, nx: 0, ny: 0, vn: 0, h: 0 }, inn: new Uint8Array(24), act: [],
       proxy: { x: 0, y: 0, vx: 0, vy: 0, w: 0, im: 0, ii: 0 }, big: [], nAwake: 0, awake: new Uint8Array(64), sg: { on: false, lists: [], x0: 0, y0: 0, cell: 48, gw: 0, gh: 0 }, gcount: new Int32Array(1024), gitem: new Int32Array(1024), gcell: new Int32Array(1024), gfill: new Int32Array(1024),
@@ -965,6 +1051,7 @@ const IceSim = (() => {
     for (const p of sim.pieces) { p.h = h; p.im *= f; p.ii *= f; }
   }
 
-  return { create, step, advance, follow, lindqvist, setThickness, ellOf, vnoise, hash2, DEFAULTS, CH };
+  const field = { A: FA, ROUGH: F_ROUGH, LEVEL: F_LEVEL, MIN: F_MIN, grid: fieldGrid, dist: fieldDist, FD, warp: fieldWarp, warpGrid: fieldWarpGrid, cell: fieldCell };
+  return { create, step, advance, follow, lindqvist, setThickness, ellOf, vnoise, hash2, DEFAULTS, CH, field };
 })();
 if (typeof module !== 'undefined') module.exports = IceSim;

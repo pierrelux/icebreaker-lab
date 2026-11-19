@@ -100,7 +100,7 @@ The table records the hull-scale constants it was measured with. If one of them 
 
 ![Four zooms of the same voyage](docs/st-lawrence-view.jpg)
 
-*The same voyage at four zooms. Top left: the Gulf, at 41 minutes per second. Top right: 3 m per pixel, where the ice-breaking simulator has taken over and the ice around the ship is made from the chart. Bottom left: the hull in level ice, in real time. Bottom right: further along, where the chart shows 80% ice and the ship pushes through floes.*
+*One view at four zooms. Top left: the Gulf, at 41 minutes per second, with the coast, lakes, rivers and towns. Top right: 3 m per pixel, where the ice-breaking simulator moves the ship; the window is full of floes made from the chart, and only those near the ship are bodies. Bottom left: leaving Les Escoumins, at 6 m per pixel. Bottom right: the hull in level ice, in real time.*
 
 The page is one view of one ship on one clock. The camera sits on the map and zooms from the whole Gulf (1 km per pixel) down to the hull (a few centimetres per pixel). Which simulator moves the ship follows the zoom:
 
@@ -108,19 +108,29 @@ The page is one view of one ship on one clock. The camera sits on the map and zo
 |---|---|---|
 | What moves the ship | the route-scale model, `stlnav-core.js` | the ice-breaking simulator, `icebreaker-core.js` |
 | Clock | 30 times real time up to 2 hours per second, faster the further out | 1 to 4 times real time |
-| Ice | the chart | level ice or floes made from the chart at the ship's place |
+| Ice | the chart, as a colour (beyond 22 m per pixel) | single floes and level ice made from the chart, across the whole window; near the ship they are bodies that break |
 
 A slider and two buttons, "Zoom to the hull" and "Whole voyage", move between the two ends; the page says how much closer the view has to be for the ice to break.
 
 The clock has to follow the zoom. Breaking ice is computed 360 times per second of the ship's time, which a browser manages at about the speed of a clock, and a voyage lasts 11 hours. Far out, the ship therefore moves with the model that the section above fits to the ice-breaking computation, so its speed does not jump when the two swap: in one run, the model had the ship at 7.48 m/s in 90% ice of 0.30 m, and the ice-breaking simulator held 7.46 to 7.49 m/s after taking over.
 
-**Endless ice around the ship.** The ice-breaking simulator used to hold one fixed sheet 1,100 m long. For the page it has a new scenario, `field`: the water is cut into squares of 256 m, each made when the ship comes near and dropped when it is far away. A square holds one sheet of level ice where the chart shows 90% or more, floes that cover the chart's share of the water below that, or nothing. The ship starts inside the ice with a channel astern. `checks/field.js` (4 checks, all passing) compares it with the fixed sheet: 7.55 against 7.53 m/s in 0.3 m of level ice, 5.94 against 5.92 m/s in 0.6 m.
+**The same ice everywhere, bodies only near the ship.** The ice-breaking simulator used to hold one fixed sheet 1,100 m long. For the page it has a scenario, `field`, in which the ice is one pattern laid over an endless plane. The plane carries a lattice of 40 m with one site per cell, and each site owns the ground nearer to it than to any other site. Where the chart shows 90% of ice or more, that ground is level ice, and neighbouring grounds make one sheet. Below that the site holds a floe: its ground, shrunk about the site. Not every site has a floe, the floes differ in size, and the ice is denser in some patches than in others, so that over a few hundred metres the floes cover the chart's share of the water (0.104 measured for 0.10 asked, 0.513 for 0.50, 0.815 for 0.85).
 
-What is real and what is invented close to the ship: the share of ice and its (assumed) thickness come from the chart, cell by cell. The shapes of the floes are invented, because the chart only gives a share per kilometre. The coast is a smooth outline from 1 km data. Other ships are drawn but do not break ice.
+The pattern is a function of the place, so two things can read it. The simulator turns it into bodies near the ship, in squares of 256 m that are made when the ship comes near (within 190 m for floes, 420 m for level ice) and dropped when it is far away. The page paints the same pattern into tiles for the rest of the window, with the same shading. A floe therefore does not change when the ship comes near and it becomes a body, and the window is full of ice at any zoom under 14 m per pixel: there is no disc of ice around the ship any more. Where the ship has been, the channel is drawn over the tiles. Between 14 and 22 m per pixel the floes fade into the chart's colour.
+
+The ship starts inside the ice with a channel astern. `checks/field.js` (4 checks, all passing) compares the scenario with the fixed sheet: 7.55 against 7.53 m/s in 0.3 m of level ice, 5.94 against 5.92 m/s in 0.6 m.
+
+What is real and what is invented close to the ship: the share of ice and its (assumed) thickness come from the chart, cell by cell. The shapes of the floes are invented, because the chart only gives a share per kilometre. The coast is real, with points 50 to 500 m apart. Other ships are drawn but do not break ice. Floes that the ship pushed aside are back in their first places once the ship is 300 m past them, with the channel drawn through them.
+
+One approximation comes with the single view. The map is flat, with one scale from east to west for all latitudes, so away from its middle latitude a metre of the map is not quite a metre (4% at Sept-Îles). The ship's speed over the ground is kept right; the ice is moved under the ship by the difference, together with the drift of the water, so far ice slides slowly over the map.
 
 **The route-scale model in JavaScript.** `stlnav-core.js` is a port of `stlnav/ships.py`, `traffic.py` and `env.py`. It copies no number by hand: the fields, routes, ship classes, hull-scale table and settings all come from `stl-data.json` (810 kB, 180 kB compressed), which `stlnav/export_web.py` writes. The fields are reduced for the page: currents every 6 km and wind every 16 km, in 9 frames 3 hours apart, and the day repeats.
 
-The map is not drawn from the model's 2 km cells, which look like squares on a screen. `export_web.py` also writes `stl-map.png` (18 kB), the same chart on its own grid of about 1 km, and the page draws the ice from it with a smoothing of the edges between ice classes. The land is not drawn from cells at all: the export traces the edge of the chart's land as 113 closed lines (4,700 points, in `stl-data.json`), and the page fills them as a shape, which has a sharp edge at any zoom. That coast is still only as detailed as the chart, about 1 km. All of this is only drawn: the model works on 2 km cells, so within a cell of the coast the ship can be stopped by land that the picture shows as water.
+The ice of the far view is not drawn from the model's 2 km cells, which look like squares on a screen. `export_web.py` also writes `stl-map.png` (18 kB), the same chart on its own grid of about 1 km, and the page draws the ice from it with a smoothing of the edges between ice classes.
+
+**The land.** `stlnav/coast.py` writes `stl-coast.json` (760 kB, 270 kB compressed): the coastline of GSHHG at full resolution, cut to the map (1,789 closed lines, 82,000 points, 50 to 500 m apart), 54 lakes and 97 rivers from the same release, and 1,146 names from OpenStreetMap (every city and town, and the villages within 5 km of the sea). Lakes, rivers and names are only there to find one's way. The page thins the coast twice for the farther views and draws the part near the window; the larger a place, the farther out its name shows.
+
+The model still works on cells of 2 km, and its coast is not this one. Three things keep the two from showing as a contradiction. The page tests grounding against the coast that is drawn, also for a click on the water and for the pilot. It carries the model's ice three cells under the model's land, so that the ice does not thin out before the drawn coast. And a voyage is fitted to the finer coast when it starts: it leaves from the first point of its route with 300 m of water around (the water cell nearest Les Escoumins lies on the finer land), and a leg that crosses land gets one more point to go around it (an island before Sept-Îles is too small for the model's cells). Of 20 routes, 9 touch the finer land, each over its first or last 500 m at most; ships are not drawn there.
 
 `checks/stlnav_js.py` runs the Python model on the page's data and compares the port with it (8 checks, all passing):
 
@@ -134,12 +144,16 @@ The map is not drawn from the model's 2 km cells, which look like squares on a s
 
 Random departures are switched off in those comparisons, because the two random generators differ. The generator is checked on the mean number of ships at sea: 26.4 simulated against 25.4 expected.
 
-The page steers with a small pilot of its own; the Python package has none, because there the policy is what is to be learned. The pilot follows the route 1.5 km to its right and turns to starboard when another ship will pass within 1.2 km. Over 60 test voyages it arrived 59 times and collided once; without that rule it arrived 36 times.
+The page steers with a small pilot of its own; the Python package has none, because there the policy is what is to be learned. The pilot follows the route 1.5 km to its right and turns to starboard when another ship will pass within 1.2 km, unless land lies within 4 km on that side; then it keeps to the route at a quarter of the throttle. Over 60 test voyages with the model's own land it arrived 59 times and collided once; without that rule it arrived 36 times. On the page, with the finer coast, 22 of 24 voyages arrived, 2 ended in a collision with another ship and none ran aground.
 
-To rebuild the data file after a change to the routes, the classes or the table, run the checks of the page's two simulators, and look at the page locally (then open http://localhost:8000):
+To rebuild the data file after a change to the routes, the classes or the table, rebuild the land, run the checks of the page's two simulators, and look at the page locally (then open http://localhost:8000). The land needs `gshhs_f.b` and `wdb_rivers_f.b` from `gshhg-bin-2.3.7.zip` (119 MB, https://www.soest.hawaii.edu/pwessel/gshhg/) in `data/gshhg`, and the answer of the Overpass query written at the top of `stlnav/coast.py` in `data/osm/places.json`:
 
 ```bash
 uv run --no-project --python 3.12 --with jax --with xarray --with 'netCDF4<1.7.5' --with scipy --with matplotlib python -m stlnav.export_web
+```
+
+```bash
+uv run --no-project --python 3.12 --with numpy python -I stlnav/coast.py data/gshhg data/osm/places.json stl-data.json stl-coast.json
 ```
 
 ```bash
@@ -154,7 +168,7 @@ node checks/field.js
 python3 -m http.server 8000
 ```
 
-The ice chart is from Fisheries and Oceans Canada (Daily Ocean Variables from Satellite, through the St. Lawrence Global Observatory), under the Open Government Licence - Canada. The currents and wind are from Environment and Climate Change Canada's MSC Datamart.
+The ice chart is from Fisheries and Oceans Canada (Daily Ocean Variables from Satellite, through the St. Lawrence Global Observatory), under the Open Government Licence - Canada. The currents and wind are from Environment and Climate Change Canada's MSC Datamart. The coastline, lakes and rivers are from GSHHG 2.3.7 (Wessel and Smith 1996), under the GNU Lesser General Public License. The names of towns are © OpenStreetMap contributors, under the Open Database License.
 
 ## How the ice breaks
 

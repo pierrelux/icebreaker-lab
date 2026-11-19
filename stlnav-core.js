@@ -257,10 +257,12 @@ const StlNav = (() => {
   }
   // Action for one step: head for nav.manual if there is one, else for the next point of the route, and keep clear of other ships.
   // Keeping clear: when a ship will pass within `clear` km in the next 15 minutes, turn to starboard, as the traffic does when it
-  // follows the rules; slow right down instead if land lies that way. A ship coming up from astern is left to pass: it moves to its
-  // starboard, so the own ship eases to port. Within 1 km of a ship the own ship also slows down.
+  // follows the rules; if land lies that way, keep to the route instead, at a quarter of the throttle. A ship coming up from astern is
+  // left to pass: it moves to its starboard, so the own ship eases to port. Within 1 km of a ship the own ship also slows down.
+  // opt.land(lon, lat) -> true on land replaces the model's own land, whose cells are 2 km wide (the page passes its finer coast).
   function pilot(w, s, nav, thr, opt) {
     const o = Object.assign({ avoid: true, clear: 1.2 }, opt || {}), own = w.classes[s.cls], dt = w.cfg.dt, last = nav.path.length - 1, ts = s.traffic;
+    const dry = o.land || ((lon, lat) => landAt(w, lon, lat) > 0.2);
     nav.avoiding = false; nav.tgt = nav.manual || nav.path[nav.k];
     if (o.avoid) {
       const cs = Math.cos(s.th), sn = Math.sin(s.th), kx = KY * Math.cos(s.lat * RAD); let risk = false, astern = false, near = Infinity;
@@ -276,8 +278,9 @@ const StlNav = (() => {
       if (risk || astern) {
         nav.avoiding = true; const slow = near < 1 ? Math.min(thr, 0.25) : thr, a = s.th - 0.8, c = Math.cos(s.lat * RAD);
         if (!risk) return [thr, 0.5];
-        const blocked = landAt(w, s.lon + 4 * Math.cos(a) / (KY * c), s.lat + 4 * Math.sin(a) / KY) > 0.2 || landAt(w, s.lon + 2 * Math.cos(a) / (KY * c), s.lat + 2 * Math.sin(a) / KY) > 0.2;
-        return blocked ? [Math.min(thr, 0.1), 0] : [slow, -1];
+        let blocked = false; for (const d of [0.5, 1, 2, 4]) if (dry(s.lon + d * Math.cos(a) / (KY * c), s.lat + d * Math.sin(a) / KY)) blocked = true;
+        if (!blocked) return [slow, -1];
+        thr = Math.min(thr, 0.25);
       }
     }
     for (let pass = 0; pass < 4; pass++) {
@@ -286,7 +289,7 @@ const StlNav = (() => {
         nav.manual = null; let j = nav.k; for (let q = nav.k; q <= last; q++) if (dist(s.lon, s.lat, nav.path[q]) < dist(s.lon, s.lat, nav.path[j])) j = q;
         nav.k = j < last && dist(s.lon, s.lat, nav.path[j + 1]) < dist(nav.path[j].lon, nav.path[j].lat, nav.path[j + 1]) ? j + 1 : j; continue;
       }
-      if (!nav.manual && d < 6 && nav.k < last) { nav.k++; continue; }
+      if (!nav.manual && d < (tgt.reach || 6) && nav.k < last) { nav.k++; continue; }   // a point of the route is passed at 6 km, or at its own `reach`
       const dx = (tgt.lon - s.lon) * KY * Math.cos(s.lat * RAD), dy = (tgt.lat - s.lat) * KY, err = (((Math.atan2(dy, dx) - s.th + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
       return [thr, clip(err / (own.turn * clip(s.v / own.uow, 0.2, 1) * dt), -1, 1)];
     }

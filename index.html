@@ -175,7 +175,8 @@
       <p>An icebreaker on a voyage through the estuary and Gulf of St. Lawrence. Zoom out and you see the whole voyage; zoom in on the ship and you see its hull breaking the ice. It is one ship and one clock.</p>
       <p><b>The clock follows the zoom.</b> Breaking ice is computed 360 times per second of the ship's time, which a browser manages at about the speed of a real clock. So close to the ship, under 10 m per pixel, time runs at 1 to 4 times real speed and the ice is broken for real. Far out, time runs up to two hours per second, and the ship moves at the speed a model fitted to that same ice-breaking computation gives.</p>
       <p id="aboutIce">The ice is a chart of concentration for one past winter day. The chart gives no thickness, so one thickness is assumed everywhere.</p>
-      <p>Close to the ship the ice is made from the chart: level ice where the chart shows 90 % or more, floes covering the chart's share of the water below that. The shapes of the floes are invented; the chart only gives a share per kilometre.</p>
+      <p>Under 14 m per pixel the window shows the ice itself, made from the chart: level ice where the chart shows 90 % or more, floes covering the chart's share of the water below that. It is the same ice across the whole window. Only the part near the ship, 200 to 400 m around it, is made of bodies that break and move; the rest is a picture of the ice the ship would find there. The shapes of the floes are invented; the chart only gives a share per kilometre.</p>
+      <p>The land is there to find your way: coastline, lakes and rivers with points 50 to 500 m apart, and the names of towns. The ship runs aground on the coast that is drawn.</p>
       <p>The edge of level ice is crushed on the sloping hull, which pushes it down. When the downward force passes the bearing capacity of the ice wedge, <code>P = C_f (θ/π)² σ_f h²</code>, a cusp of radius <code>R = C_l ℓ (1 + C_v v_n)</code> snaps off. A floe splits when the in-plane force passes <code>h K_Ic √L</code>.</p>
       <p>The other ships are generated: they leave ports at published yearly rates and on winter ferry timetables, keep to their routes, queue in ice, and give way to you nine times in ten. Your ship follows a route the Coast Guard recommended in ice and turns away from ships that come too close. Click the water to send it somewhere else first; A and D steer by hand when you are close.</p>
       <p id="aboutData"></p>
@@ -204,7 +205,7 @@
   // The switch between the two follows the zoom (see `update`).
   const $ = id => document.getElementById(id);
   const cv = $('view'), ctx = cv.getContext('2d'), tr = $('trace'), tctx = tr.getContext('2d');
-  const TS = 256, vnoise = IceSim.vnoise, hash2 = IceSim.hash2, KY = StlNav.KY, RAD = Math.PI / 180, TAU = 2 * Math.PI, CH = IceSim.CH;
+  const TS = 256, vnoise = IceSim.vnoise, hash2 = IceSim.hash2, KY = StlNav.KY, RAD = Math.PI / 180, TAU = 2 * Math.PI, CH = IceSim.CH, FLD = IceSim.field;
   const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
   const NEAR = 10;                             // metres per pixel under which the ice around the ship is broken for real
   const LAND = 'rgb(86,84,72)', SHIP_COL = { icebreaker: '#e8a33d', ferry: '#1b6f8c', ropax: '#1b6f8c' };
@@ -220,7 +221,11 @@
     img: null, fine: null, coast: null, zoomGoal: 0, pos: null, prev: null, own0: null, kx: 1, lonW: 0, latN: 0, acc: 0, rate: 1, slow: 1, mode: 'model', byHand: false, stuck: 0,
     view: { x: 0, y: 0, s: 1 }, follow: true };
   let sim = null;                              // the ice-breaking simulator around the ship, while the view is close
-  const L0 = { x: 0, y: 0, th0: 0, patches: 0, checked: 0, fade: 0 };   // where the simulator's ship was last seen in its own metres; map heading of its x axis
+  const L0 = { x: 0, y: 0, checked: 0 };       // where the simulator's ship was last seen, in its own metres
+  // The ice is one pattern on a plane of its own (icebreaker-core.js, "an endless field"). The plane lies on the map and drifts with the water:
+  // its point (X, Y), in metres, is at (X + dx) / 1000, (Y + dy) / 1000 kilometres on the map. ox, oy: the simulator's origin on the plane.
+  const ICE = { dx: 0, dy: 0, ox: 0, oy: 0, ax: 0, ay: 0, tx: 0, ty: 0, seed: 1, tiles: new Map(), missing: 0, late: 0, cut: [], rev: -1, sim: null, gk: new Map() };
+  const TP = 128, DETAIL = 14;                 // pixels of a tile of ice; metres per pixel up to which single floes are drawn
   const toX = lon => (lon - M.lonW) * M.kx, toY = lat => (M.latN - lat) * KY;
   const hm = sec => Math.floor(sec / 3600) + ' h ' + String(Math.floor(sec % 3600 / 60)).padStart(2, '0');
   const distKm = (lon, lat, q) => Math.hypot((q.lon - lon) * KY * Math.cos(lat * RAD), (q.lat - lat) * KY);
@@ -300,11 +305,12 @@
   }
 
   const L2 = [0, 0];
-  function drawSheet(S, vx0, vy0, vx1, vy1, budget) {
+  function drawSheet(S, vx0, vy0, vx1, vy1, budget, dry) {   // dry: only make the textures the window needs, and tell whether all are there
     const T = getTiles(S), span = TS * T.tex;
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
     for (let c = 0; c < 4; c++) { S.toLocal(c & 1 ? vx1 : vx0, c & 2 ? vy1 : vy0, L2); x0 = Math.min(x0, L2[0]); x1 = Math.max(x1, L2[0]); y0 = Math.min(y0, L2[1]); y1 = Math.max(y1, L2[1]); }
     const i0 = Math.max(0, Math.floor(x0 / span)), i1 = Math.min(T.ntx - 1, Math.floor(x1 / span)), j0 = Math.max(0, Math.floor(y0 / span)), j1 = Math.min(T.nty - 1, Math.floor(y1 / span));
+    if (dry) { let ok = true; for (let tj = j0; tj <= j1; tj++) for (let ti = i0; ti <= i1; ti++) if (!tileAt(S, T, ti, tj, budget) && Math.min(TS, T.wt - ti * TS) > 0 && Math.min(TS, T.ht - tj * TS) > 0) ok = false; return ok; }
     ctx.save(); ctx.transform(S.cs, S.sn, -S.sn, S.cs, S.x, S.y); ctx.translate(-S.cx, -S.cy);
     for (let tj = j0; tj <= j1; tj++) for (let ti = i0; ti <= i1; ti++) {
       const t = tileAt(S, T, ti, tj, budget); if (t) ctx.drawImage(t.c, t.ox * T.tex, t.oy * T.tex, t.w * T.tex, t.h * T.tex);
@@ -319,7 +325,7 @@
   }
 
   // ---------------------------------------------------------------- water, wake, pieces, ship
-  let waterPat = null;
+  let waterPat = null, waterCv = null, seaPat = null, seaPatFor = '';
   function makeWater() {
     const n = 256, c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data, P = 8;
     const pn = (x, y, s) => { const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy), m = (a, b) => hash2(((a % P) + P) % P, ((b % P) + P) % P, s);
@@ -328,7 +334,11 @@
       const v = pn(x / 32, y / 32, 3), w = pn(x / 16 + 3.3, y / 16 + 1.7, 9), o = (y * n + x) * 4, t = v * 0.65 + w * 0.35;
       d[o] = 150; d[o + 1] = 215; d[o + 2] = 230; d[o + 3] = Math.max(0, t - 0.45) * 70;
     }
-    g.putImageData(img, 0, 0); waterPat = ctx.createPattern(c, 'repeat'); waterPat.setTransform(new DOMMatrix().scale(0.3));
+    g.putImageData(img, 0, 0); waterPat = ctx.createPattern(c, 'repeat'); waterPat.setTransform(new DOMMatrix().scale(0.25)); waterCv = c;   // repeats every 64 m
+  }
+  function waterOver(sea) {   // the same ripples on the sea's colour, as one opaque pattern: one fill instead of two
+    if (!waterCv || seaPatFor === sea) return; const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
+    g.fillStyle = sea; g.fillRect(0, 0, 256, 256); g.drawImage(waterCv, 0, 0); seaPat = ctx.createPattern(c, 'repeat'); seaPat.setTransform(new DOMMatrix().scale(0.25)); seaPatFor = sea;
   }
 
   function drawPieces(sub, x0, y0, x1, y1) {
@@ -373,10 +383,166 @@
     }
   }
 
+  // ---------------------------------------------------------------- the ice beyond what the simulator holds
+  // The simulator keeps bodies of ice only near the ship. Everywhere else in the window the same pattern is painted from its definition
+  // (IceSim.field), with the shading of `paint` above, into tiles of TP pixels at half a metre per pixel and five coarser levels. So the
+  // window is full of the ice the ship would find there, and a floe does not change when the ship comes near and it becomes a body.
+  function far4(G, wx, wy, lim) {   // as IceSim.field.dist for ice of any kind, but it stops as soon as the point is known to be more than lim outside
+    const nI = G.nI, ci = Math.floor(wx / FLD.A) - G.I0, cj = Math.floor(wy / FLD.A) - G.J0, X = G.x, Y = G.y; let best = 1e30, k = 0;
+    for (let dj = -1; dj <= 1; dj++) { const row = (cj + dj) * nI + ci; for (let q = row - 1; q <= row + 1; q++) { const dx = wx - X[q], dy = wy - Y[q], d2 = dx * dx + dy * dy; if (d2 < best) { best = d2; k = q; } } }
+    const kind = G.kind[k]; if (!kind) return 50;
+    const rx = wx - X[k], ry = wy - Y[k], o = 24 * k, nbx = G.nbx, nby = G.nby, nbh = G.nbh; let d = -50;
+    if (kind === 1) { const s = G.s[k]; for (let q = 0; q < 24; q++) { const v = rx * nbx[o + q] + ry * nby[o + q] - s * nbh[o + q]; if (v > d) { d = v; if (v > lim) break; } } return d; }
+    const kd = G.kind, off = G.off; for (let q = 0; q < 24; q++) if (kd[k + off[q]] !== 2) { const v = rx * nbx[o + q] + ry * nby[o + q] - nbh[o + q]; if (v > d) { d = v; if (v > lim) break; } } return d;
+  }
+  function paintFar(L, tx, ty) {
+    const A = FLD.A, m = 0.5 * (1 << L), T = TP * m, X0 = tx * T, Y0 = ty * T, seed = ICE.seed, pad = L <= 2 ? 6 : 0, FD = FLD.FD;
+    const I0 = Math.floor((X0 - pad) / A) - 3, J0 = Math.floor((Y0 - pad) / A) - 3, nI = Math.floor((X0 + T + pad) / A) + 4 - I0, nJ = Math.floor((Y0 + T + pad) / A) + 4 - J0;
+    const G = FLD.grid(seed, iceAt, I0, J0, nI, nJ); if (!G.level && !G.floes) return { c: null, used: frameNo };
+    const wg = L <= 2 ? FLD.warpGrid(seed, X0, Y0, X0 + T, Y0 + T, L === 2 ? 8 : 4) : null, ws = wg ? 1 / wg.step : 0, rough = L <= 1, ls = seed * 13 + 5, solid = G.level === nI * nJ, edge = Math.max(0.9, 0.5 * m);
+    const c = document.createElement('canvas'); c.width = c.height = TP; const g = c.getContext('2d'), img = g.createImageData(TP, TP), px = img.data, kd = G.kind, sds = G.seed;
+    const tf = [1, 1, 1, 0.6, 0.3, 0][L];   // the patches of thinner, greyer ice are 50 m across: drawn a few pixels wide they look like blocks, so they fade out with distance
+    for (let j = 0; j < TP; j++) {
+      const Y = Y0 + (j + 0.5) * m;
+      for (let i = 0, o = j * TP * 4; i < TP; i++, o += 4) {
+        const X = X0 + (i + 0.5) * m; let wx = X, wy = Y, d = -50, sd = ls;
+        if (L >= 4 && !solid) {   // floes are a few pixels across or less: the share of the pixel that is ice, from four points in it, in one colour
+          let cov = 0; for (let q = 0; q < 4; q++) { const dq = far4(G, X + (q & 1 ? 0.25 : -0.25) * m, Y + (q & 2 ? 0.25 : -0.25) * m, 0.25 * m); cov += dq <= -0.25 * m ? 0.25 : dq >= 0.25 * m ? 0 : 0.125 - 0.5 * dq / m; }
+          if (cov < 0.004) continue;
+          const thin = 0.07 + tf * (clamp(-0.36 * vnoise(X / 47, Y / 47, ls), 0, 0.75) - 0.07);
+          px[o] = 236 - 62 * thin; px[o + 1] = 239 - 36 * thin; px[o + 2] = 242 - 20 * thin; px[o + 3] = 255 * Math.min(1, cov * 1.02); continue;
+        }
+        if (!solid) {
+          if (wg) {
+            const gx = (X - wg.x0) * ws, gy = (Y - wg.y0) * ws, i0 = gx | 0, j0 = gy | 0, fx = gx - i0, fy = gy - j0, q = j0 * wg.nx + i0, w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+            wx = X + wg.dx[q] * w00 + wg.dx[q + 1] * w10 + wg.dx[q + wg.nx] * w01 + wg.dx[q + wg.nx + 1] * w11; wy = Y + wg.dy[q] * w00 + wg.dy[q + 1] * w10 + wg.dy[q + wg.nx] * w01 + wg.dy[q + wg.nx + 1] * w11;
+          }
+          d = FLD.dist(G, wx, wy, false); if (kd[FD.k] === 1) sd = sds[FD.k];
+          if (rough && d > -1.6 && d < 1.5) d += FLD.ROUGH * (vnoise(wx / 9, wy / 9, sd) + 0.4 * vnoise(wx / 3.3, wy / 3.3, sd + 1));
+          if (d >= edge) continue;
+        }
+        const a = d <= -0.5 * m ? 1 : d >= 0.5 * m ? 0 : 0.5 - d / m; let r = 0, gg = 0, b = 0;                       // as in `paint`, one tile pixel for one texel
+        if (a > 0) {
+          const hm = Math.max(0.35, 1 + 0.15 * vnoise(X / 47, Y / 47, sd)), tn = L >= 3 ? 0 : 0.65 * vnoise(X / 13, Y / 13, sd + 11) + (L >= 2 ? 0 : 0.35 * vnoise(X / 4.1, Y / 4.1, sd + 12));
+          const thin = 0.07 + tf * (clamp((1 - hm) * 2.4, 0, 0.75) - 0.07), Lm = 238 + 8 * tn; r = Lm - 62 * thin; gg = Lm - 36 * thin + 2; b = Lm - 20 * thin + 5;
+          if (d > -0.9) { const e = (d + 0.9) / 0.9, e2 = e * e; r -= 50 * e2; gg -= 22 * e2; b -= 10 * e2; }
+        }
+        const hv = 1 - d / 0.9, ha = d >= 0.9 ? 0 : d > 0 ? 0.5 * hv * hv : 0.5, oa = a + (1 - a) * ha; if (oa <= 0) continue;
+        px[o] = (r * a + 96 * ha * (1 - a)) / oa; px[o + 1] = (gg * a + 186 * ha * (1 - a)) / oa; px[o + 2] = (b * a + 198 * ha * (1 - a)) / oa; px[o + 3] = 255 * oa;
+      }
+    }
+    g.putImageData(img, 0, 0); return { c, used: frameNo };
+  }
+  const W2 = [0, 0];
+  // The ground whose ice is alive, chunk by chunk, in the simulator's metres: there the bodies are drawn, not the tiles. `water`: the cells of
+  // the chunk's floes and open water. `sheet`: its level ice, 'all' of the chunk's square or the cells of level ice that reach into it.
+  function ground() {
+    const f = sim.field; if (ICE.rev === f.rev && ICE.sim === sim) return ICE.gk;
+    const ox = ICE.ox, oy = ICE.oy, seed = ICE.seed; if (ICE.sim !== sim) ICE.gk.clear();
+    const shape = cells => {
+      const q = new Path2D();
+      for (const c of cells) {
+        const n = c.length; let first = true;
+        for (let i = 0; i < n; i++) {
+          const a = c[i], b = c[(i + 1) % n], m = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 6));
+          for (let e = 0; e < m; e++) {   // a cell is cut in the displaced plane: find the points that the displacement sends to its edge
+            const tx = a[0] + (b[0] - a[0]) * e / m, ty = a[1] + (b[1] - a[1]) * e / m; let x = tx, y = ty;
+            for (let it = 0; it < 3; it++) { FLD.warp(seed, x + ox, y + oy, W2); x += tx - (W2[0] - ox); y += ty - (W2[1] - oy); }
+            if (first) { q.moveTo(x, y); first = false; } else q.lineTo(x, y);
+          }
+        }
+        q.closePath();
+      }
+      return q;
+    };
+    for (const [key, c] of f.cells) if (!ICE.gk.has(key)) ICE.gk.set(key, { x: c.x, y: c.y, water: c.cells.length ? shape(c.cells) : null, sheet: c.sheet === 'all' ? 'all' : c.sheet && c.sheet.length ? shape(c.sheet) : null });
+    for (const key of ICE.gk.keys()) if (!f.cells.has(key)) ICE.gk.delete(key);
+    ICE.rev = f.rev; ICE.sim = sim; return ICE.gk;
+  }
+  // The ice, drawn in its own plane: tiles everywhere, the channel the ship has left, then the bodies of the simulator on their ground.
+  // rx, ry, rw, rh: the map's grid on the screen. det: how much of the single floes to show (it fades into the chart's colour far out).
+  function drawIce(k, det, rx, ry, rw, rh, shipX, shipY) {
+    const v = M.view, mpp = 1 / k, vx = 1000 * v.x - ICE.dx, vy = 1000 * v.y - ICE.dy;
+    const ax = ICE.ax = Math.floor(vx / CH) * CH, ay = ICE.ay = Math.floor(vy / CH) * CH; ICE.tx = W / 2 + k * (ax - vx); ICE.ty = Hh / 2 + k * (ay - vy);   // drawn about a point near the window, in small numbers
+    const x0 = -ICE.tx / k, y0 = -ICE.ty / k, x1 = x0 + W / k, y1 = y0 + Hh / k, wa = clamp((3 - mpp) / 1.5, 0, 1);
+    ctx.save(); ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
+    waterOver(col.sea); const water = wa >= 1 && seaPat ? seaPat : col.sea;                          // close up the water has ripples
+    ctx.setTransform(k * dpr, 0, 0, k * dpr, ICE.tx * dpr, ICE.ty * dpr);
+    ctx.globalAlpha = det; ctx.fillStyle = water; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    if (wa > 0 && wa < 1 && waterPat) { ctx.globalAlpha = wa; ctx.fillStyle = waterPat; ctx.fillRect(x0, y0, x1 - x0, y1 - y0); }
+    ctx.globalAlpha = det; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'low';     // the tiles are within a factor two of the screen's pixels
+    const L = clamp(Math.floor(Math.log2(mpp / 0.5) + 0.2), 0, 5), m = 0.5 * (1 << L), T = TP * m, tiles = ICE.tiles, want = [];   // tiles as fine as the screen or finer: the bodies of the simulator are drawn sharp, and the tiles must not look softer beside them
+    // Tiles are laid on whole pixels of the screen, each ending where the next begins: neither a gap nor an overlap shows as a line between them.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const PX = X => Math.round((ICE.tx + (X - ax) * k) * dpr), PY = Y => Math.round((ICE.ty + (Y - ay) * k) * dpr);
+    const blit = (c, sx, sy, sw, X0, Y0, size) => { const a = PX(X0), b = PY(Y0); ctx.drawImage(c, sx, sy, sw, sw, a, b, PX(X0 + size) - a, PY(Y0 + size) - b); };
+    for (let tj = Math.floor((ay + y0) / T); tj <= Math.floor((ay + y1) / T); tj++) for (let ti = Math.floor((ax + x0) / T); ti <= Math.floor((ax + x1) / T); ti++) {
+      const t = tiles.get(L + ':' + ti + ':' + tj), X = ti * T, Y = tj * T;
+      if (t) { t.used = frameNo; if (t.c) blit(t.c, 0, 0, TP, X, Y, T); continue; }
+      want.push([ti, tj, (X + T / 2 - ax - (x0 + x1) / 2) ** 2 + (Y + T / 2 - ay - (y0 + y1) / 2) ** 2]);
+      // until it is painted: the same ground from the coarser level, or from the finer one, or the chart's flat colour
+      const pi = Math.floor(ti / 2), pj = Math.floor(tj / 2), up = tiles.get((L + 1) + ':' + pi + ':' + pj);
+      if (up) { up.used = frameNo; if (up.c) blit(up.c, (ti - 2 * pi) * TP / 2, (tj - 2 * pj) * TP / 2, TP / 2, X, Y, T); continue; }
+      let n = 0; for (let q = 0; q < 4; q++) { const dn = tiles.get((L - 1) + ':' + (2 * ti + (q & 1)) + ':' + (2 * tj + (q >> 1))); if (!dn) continue; n++; dn.used = frameNo; if (dn.c) blit(dn.c, 0, 0, TP, X + (q & 1) * T / 2, Y + (q >> 1) * T / 2, T / 2); }
+      if (n < 4) { const c = iceAt(X + T / 2, Y + T / 2).conc; if (c > 0.01) { ctx.fillStyle = 'rgba(236,243,246,' + (0.96 * Math.min(1, c) * (1 - n / 4)).toFixed(3) + ')'; const a = PX(X), b = PY(Y); ctx.fillRect(a, b, PX(X + T) - a, PY(Y + T) - b); } }
+    }
+    ICE.missing = want.length;
+    if (want.length) {   // paint the nearest missing tiles, for a few milliseconds per frame
+      want.sort((a, b) => a[2] - b[2]); const t0 = performance.now(), lim = firstFrame ? 14 : sim ? 4 : 8;
+      for (const q of want) { const t = paintFar(L, q[0], q[1]); tiles.set(L + ':' + q[0] + ':' + q[1], t); ICE.missing--; if (performance.now() - t0 > lim) break; }   // shown from the next frame on
+    }
+    ctx.setTransform(k * dpr, 0, 0, k * dpr, ICE.tx * dpr, ICE.ty * dpr);
+    if (frameNo % 120 === 0 && tiles.size > 700) for (const [key, t] of tiles) if (t.used < frameNo - 240) tiles.delete(key);   // a tile is 64 kB
+    // the channel: where the ship has been, the ice is open water
+    const c = ICE.cut, far = 300 + 40 * mpp;
+    if (c.length > 3) {
+      ctx.beginPath(); let pen = false;
+      for (let i = 0; i < c.length; i += 2) {
+        const X = c[i] - ax, Y = c[i + 1] - ay, vis = X > x0 - far && X < x1 + far && Y > y0 - far && Y < y1 + far;
+        if (!vis) { pen = false; continue; } if (pen) ctx.lineTo(X, Y); else { ctx.moveTo(X, Y); pen = true; }
+      }
+      if (pen) ctx.lineTo(shipX - ICE.dx - ax, shipY - ICE.dy - ay);
+      ctx.lineCap = ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(21, 1.6 / k); ctx.strokeStyle = water; ctx.stroke(); ctx.lineCap = 'butt';
+    }
+    ICE.late = 0;
+    if (sim) {   // the bodies: water over their ground first, which hides the tiles' picture of the same ice
+      const ox = ICE.ox - ax, oy = ICE.oy - ay, gr = ground(), lx0 = x0 - ox, ly0 = y0 - oy, lx1 = x1 - ox, ly1 = y1 - oy, mg = 24, late = new Set(); cam.s = k;
+      // A body's texture takes a moment to paint. Until every body of a chunk has its own, the tiles keep showing that chunk: same ice, no gap.
+      // Level ice is drawn as a body only under 2 m per pixel. Farther out its tiles stay, with the channel drawn over them: they show the same sheet.
+      const budget = { n: firstFrame ? 60 : 12 }, sheets = mpp <= 2, seen = S => !(S.x + S.R < lx0 - mg || S.x - S.R > lx1 + mg || S.y + S.R < ly0 - mg || S.y - S.R > ly1 + mg) && (sheets || !S.fixed);
+      for (const S of sim.sheets) if (seen(S) && !drawSheet(S, lx0 - mg, ly0 - mg, lx1 + mg, ly1 + mg, budget, true)) late.add(S.home);
+      ICE.late = late.size; ctx.translate(ox, oy); ctx.globalAlpha = 1; ctx.imageSmoothingQuality = 'high';
+      const wet = fn => { ctx.fillStyle = water; fn(); if (wa > 0 && wa < 1 && waterPat) { ctx.globalAlpha = wa; ctx.fillStyle = waterPat; fn(); ctx.globalAlpha = 1; } };
+      for (const [key, q] of gr) {
+        if (late.has(key)) continue;
+        if (q.water) wet(() => ctx.fill(q.water));
+        // (a hand's breadth inside the square: the sheet's own edge is soft, and water under it would show as a line where the bodies end)
+        if (sheets && q.sheet === 'all') wet(() => ctx.fillRect(q.x + 0.3, q.y + 0.3, CH - 0.6, CH - 0.6));
+        else if (sheets && q.sheet) { ctx.save(); ctx.beginPath(); ctx.rect(q.x + 0.3, q.y + 0.3, CH - 0.6, CH - 0.6); ctx.clip(); wet(() => ctx.fill(q.sheet)); ctx.restore(); }
+      }
+      for (let i = 0; i < wake.length; i++) { const p = wake[i], t = p.age / p.life; ctx.fillStyle = 'rgba(205,234,240,' + (0.2 * (1 - t) * (1 - t)).toFixed(3) + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, 1 + 4.5 * t, 0, 6.2832); ctx.fill(); }
+      drawPieces(true, lx0, ly0, lx1, ly1);
+      budget.n = 0; for (const S of sim.sheets) if (seen(S) && !(late.has(S.home) && S.fixed)) drawSheet(S, lx0 - mg, ly0 - mg, lx1 + mg, ly1 + mg, budget);
+      drawPieces(false, lx0, ly0, lx1, ly1);
+    }
+    firstFrame = false; ctx.restore(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalAlpha = 1;
+  }
+
   // ---------------------------------------------------------------- the map and the voyage
-  function loadMap(d) {
+  function loadMap(d, coast) {
     const w = M.world = StlNav.create(d, { thick: +$('h').value, sigF: +$('sf').value * 1e6, wrapTime: true }), g = w.g;
     M.lonW = g.lon0; M.latN = g.lat0 + g.dlat * (g.ny - 1); M.kx = KY * Math.cos((g.lat0 + g.dlat * (g.ny - 1) / 2) * RAD);
+    // A land cell of the model holds no ice, so ice read between a water cell and the coast came out too thin, and the coast of the model
+    // (cells of 2 km) is not the coast that is drawn. Carry the ice three cells under the model's land.
+    for (let pass = 0, known = w.land.map(v => 1 - v); pass < 3; pass++) {
+      const was = Uint8Array.from(known);
+      for (let j = 0; j < g.ny; j++) for (let i = 0; i < g.nx; i++) {
+        const q = j * g.nx + i; if (was[q]) continue; let sc = 0, si = 0, n = 0;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const jj = j + dj, ii = i + di; if (jj < 0 || ii < 0 || jj >= g.ny || ii >= g.nx || !was[jj * g.nx + ii]) continue; sc += w.conc[jj * g.nx + ii]; si += w.ind[jj * g.nx + ii]; n++; }
+        if (n) { w.conc[q] = sc / n; w.ind[q] = si / n >= 0.5 ? 1 : 0; known[q] = 1; }
+      }
+    }
+    if (coast) loadCoast(coast);
     M.img = paintIce(w.conc, w.land, g.nx, g.ny, 3, false);                                      // the model's 2 km cells: drawn at once, and kept under the finer picture
     const pic = d.picture;
     if (pic) {   // the chart on its own grid of about 1 km, which the page only draws
@@ -387,14 +553,14 @@
         const px = x.getImageData(0, 0, pic.nx, pic.ny).data, n = pic.nx * pic.ny, conc = new Float32Array(n), land = new Uint8Array(n);
         for (let k = 0; k < n; k++) { const v = px[4 * k]; if (v === 255) land[k] = 1; else conc[k] = v / pic.scale; }
         M.fine = { canvas: paintIce(conc, land, pic.nx, pic.ny, 2, true, !!pic.coast), x0: toX(pic.lon0 - pic.dlon / 2), y0: toY(pic.lat0 + pic.dlat / 2), w: pic.nx * pic.dlon * M.kx, h: pic.ny * pic.dlat * KY };
-        if (pic.coast) M.coast = coastPath(pic);
+        if (pic.coast && !C.ready) M.coast = coastPath(pic);
       };
       im.src = pic.file;
     }
     const sel = $('voy'); sel.textContent = '';
     w.voyages.forEach((v, i) => { const o = document.createElement('option'); o.value = i; o.textContent = v.name; sel.appendChild(o); });
     $('aboutIce').textContent = 'The ice is the chart of concentration of ' + d.chart_date + ', drawn on its own grid of about 1 km. The chart gives no thickness, so one thickness is assumed everywhere, and the slider sets it. Currents and wind are those of ' + d.fields_date + ', repeated every day.';
-    $('aboutData').textContent = 'Data. ' + d.about.ice + ' ' + d.about.fields;
+    $('aboutData').textContent = 'Data. ' + d.about.ice + ' ' + d.about.fields + (C.ready ? ' ' + C.about : '');
     startVoyage();
   }
 
@@ -402,7 +568,7 @@
   // smooth lines and not as squares. conc and land hold ny rows of nx cells; `north` tells whether the first row is the northern one.
   function paintIce(conc, land, nx, ny, k, north, iceOnly) {
     const c2 = Float32Array.from(conc), known = new Uint8Array(nx * ny); for (let q = 0; q < nx * ny; q++) known[q] = land[q] ? 0 : 1;
-    for (let pass = 0; pass < 3; pass++) {   // carry the ice three cells under the land, or the fading coast would show a dark rim of open water
+    for (let pass = 0; pass < 5; pass++) {   // carry the ice five cells under the land, or a rim of open water would show between the chart's coast and the one drawn
       const was = Uint8Array.from(known);
       for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
         const q = j * nx + i; if (was[q]) continue; let sum = 0, n = 0;
@@ -449,6 +615,132 @@
     return P;
   }
 
+  // ---------------------------------------------------------------- the land: coast, lakes, rivers and towns (stl-coast.json)
+  // The coast comes as closed lines with points 50 to 500 m apart. It is kept at three finenesses, the coarser two thinned from the first.
+  // What is drawn is the part near the window, cut out and laid about a point of its own: a canvas keeps a path's numbers too coarsely
+  // for kilometres at a tenth of a metre per pixel, and the whole coast is too much to outline in every frame. The same lines tell
+  // whether a point is on land.
+  const C = { ready: false, about: '', fine: [], rings: [], lakes: [], rivers: [], towns: [], port: {}, band: null, win: [null, null, null], gx0: 0, gy0: 0, gx1: 0, gy1: 0 };
+  function thin(p, a, b, tol, keep) {   // Douglas-Peucker between points a and b of the flat array p (x, y, x, y, ...): marks the points to keep
+    const st = [a, b]; keep[a] = keep[b] = 1;
+    while (st.length) {
+      const e = st.pop(), s = st.pop(); if (e <= s + 1) continue;
+      const x1 = p[2 * s], y1 = p[2 * s + 1], dx = p[2 * e] - x1, dy = p[2 * e + 1] - y1, l = Math.hypot(dx, dy); let m = -1, bi = s;
+      for (let i = s + 1; i < e; i++) { const ex = p[2 * i] - x1, ey = p[2 * i + 1] - y1, d = l > 0 ? Math.abs(ex * dy - ey * dx) / l : Math.hypot(ex, ey); if (d > m) { m = d; bi = i; } }
+      if (m > tol) { keep[bi] = 1; st.push(s, bi, bi, e); }
+    }
+  }
+  function thinRing(p, tol) {   // a closed line thinned to within tol; null if less than a triangle is left
+    const n = p.length / 2; if (n < 8) return p;
+    let far = 0, fd = 0; for (let i = 1; i < n; i++) { const d = (p[2 * i] - p[0]) ** 2 + (p[2 * i + 1] - p[1]) ** 2; if (d > fd) { fd = d; far = i; } }
+    const q = new Float64Array(2 * n + 2); q.set(p); q[2 * n] = p[0]; q[2 * n + 1] = p[1];
+    const keep = new Uint8Array(n + 1), out = []; thin(q, 0, far, tol, keep); thin(q, far, n, tol, keep);
+    for (let i = 0; i < n; i++) if (keep[i]) out.push(q[2 * i], q[2 * i + 1]);
+    return out.length >= 6 ? out : null;
+  }
+  function addLine(P, p, closed, ox, oy, r) {   // the points of p, shifted by (-ox, -oy), added to a path; a closed line has its corners rounded over at most r
+    const n = p.length / 2; if (n < 2) return;
+    if (!closed) { P.moveTo(p[0] - ox, p[1] - oy); for (let i = 1; i < n; i++) P.lineTo(p[2 * i] - ox, p[2 * i + 1] - oy); return; }
+    for (let i = 0; i < n; i++) {
+      const a = (i + n - 1) % n, b = (i + 1) % n, x = p[2 * i] - ox, y = p[2 * i + 1] - oy, ax = p[2 * a] - ox - x, ay = p[2 * a + 1] - oy - y, bx = p[2 * b] - ox - x, by = p[2 * b + 1] - oy - y;
+      const la = Math.hypot(ax, ay) || 1, lb = Math.hypot(bx, by) || 1, da = Math.min(r, 0.5 * la) / la, db = Math.min(r, 0.5 * lb) / lb;
+      if (i) P.lineTo(x + ax * da, y + ay * da); else P.moveTo(x + ax * da, y + ay * da);
+      P.quadraticCurveTo(x, y, x + bx * db, y + by * db);
+    }
+    P.closePath();
+  }
+  function clipRing(p, x0, y0, x1, y1) {   // Sutherland-Hodgman: the part of a closed line inside a rectangle
+    let a = p;
+    for (let e = 0; e < 4 && a.length >= 6; e++) {
+      const out = [], n = a.length / 2, ax = e < 2 ? 0 : 1, bound = e === 0 ? x0 : e === 1 ? x1 : e === 2 ? y0 : y1, ge = e % 2 === 0;
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n, vi = a[2 * i + ax], vj = a[2 * j + ax], ii = ge ? vi >= bound : vi <= bound, ij = ge ? vj >= bound : vj <= bound;
+        if (ii) out.push(a[2 * i], a[2 * i + 1]);
+        if (ii !== ij) { const t = (bound - vi) / (vj - vi); out.push(a[2 * i] + (a[2 * j] - a[2 * i]) * t, a[2 * i + 1] + (a[2 * j + 1] - a[2 * i + 1]) * t); }
+      }
+      a = out;
+    }
+    return a;
+  }
+  function loadCoast(d) {
+    const g = M.world.g, ux = d.q * M.kx, uy = d.q * KY, x0 = toX(d.lon0), y0 = toY(d.lat0);
+    const line = r => {   // whole numbers of q degrees, each point as a step from the one before -> the map's kilometres, with the box around them
+      const n = r.length / 2, p = new Float64Array(2 * n), o = { p, x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9, area: 0 }; let x = 0, y = 0;
+      for (let i = 0; i < n; i++) { x += r[2 * i]; y += r[2 * i + 1]; const X = p[2 * i] = x0 + x * ux, Y = p[2 * i + 1] = y0 + y * uy; if (X < o.x0) o.x0 = X; if (X > o.x1) o.x1 = X; if (Y < o.y0) o.y0 = Y; if (Y > o.y1) o.y1 = Y; }
+      for (let i = 0, j = n - 1; i < n; j = i++) o.area += p[2 * j] * p[2 * i + 1] - p[2 * i] * p[2 * j + 1];
+      o.area = Math.abs(o.area) / 2; return o;
+    };
+    C.fine = d.fine.rings.map(line); C.lakes = d.lakes.map(line); C.rivers = d.rivers.map(line);
+    const box = p => { const o = { p, x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 }; for (let i = 0; i < p.length; i += 2) { if (p[i] < o.x0) o.x0 = p[i]; if (p[i] > o.x1) o.x1 = p[i]; if (p[i + 1] < o.y0) o.y0 = p[i + 1]; if (p[i + 1] > o.y1) o.y1 = p[i + 1]; } return o; };
+    const level = (tol, minArea) => { const out = []; for (const q of C.fine) { if (q.area < minArea) continue; const t = thinRing(q.p, tol); if (t) out.push(box(t)); } return out; };
+    C.rings = [C.fine, level(0.13, 0.1), level(0.5, 1.5)];   // for views under 60 m per pixel, under 260, and beyond
+    C.gx0 = -0.5 * g.dlon * M.kx; C.gy0 = -0.5 * g.dlat * KY; C.gx1 = C.gx0 + g.nx * g.dlon * M.kx; C.gy1 = C.gy0 + g.ny * g.dlat * KY;
+    // every piece of coast, filed under the bands of latitude it crosses: a point is on land if a line from it to the east crosses the coast an odd number of times
+    const NB = 640, inv = NB / (C.gy1 - C.gy0), count = new Int32Array(NB + 1); let ne = 0; for (const q of C.fine) ne += q.p.length / 2;
+    const E = new Float64Array(4 * ne), each = fn => { let e = 0; for (const q of C.fine) { const p = q.p, n = p.length / 2; for (let i = 0, j = n - 1; i < n; j = i++, e++) fn(e, p[2 * j], p[2 * j + 1], p[2 * i], p[2 * i + 1]); } };
+    const span = (ya, yb) => [clamp(Math.floor((Math.min(ya, yb) - C.gy0) * inv), 0, NB - 1), clamp(Math.floor((Math.max(ya, yb) - C.gy0) * inv), 0, NB - 1)];
+    each((e, xa, ya, xb, yb) => { E[4 * e] = xa; E[4 * e + 1] = ya; E[4 * e + 2] = xb; E[4 * e + 3] = yb; const [a, b] = span(ya, yb); for (let q = a; q <= b; q++) count[q + 1]++; });
+    for (let q = 0; q < NB; q++) count[q + 1] += count[q];
+    const list = new Int32Array(count[NB]), fill = Int32Array.from(count);
+    each((e, xa, ya, xb, yb) => { const [a, b] = span(ya, yb); for (let q = a; q <= b; q++) list[fill[q]++] = e; });
+    C.band = { E, list, start: count, inv, n: NB };
+    C.towns = d.towns.map(t => ({ name: t[0], x: toX(t[1]), y: toY(t[2]), rank: t[3], pop: t[4], w: 0, port: false }));
+    for (const key in M.world.places) {   // the town of each port of the routes: shown at any zoom
+      const pl = M.world.places[key], px = toX(pl[1]), py = toY(pl[0]), plain = n => n.normalize('NFD').replace(/[^a-zA-Z]/g, '').toLowerCase(), want = LABELS[key] ? plain(LABELS[key]) : ''; let best = null, bd = 8;
+      for (const t of C.towns) { const dd = Math.hypot(t.x - px, t.y - py) - (want && plain(t.name) === want ? 6 : 0); if (dd < bd) { bd = dd; best = t; } }   // the town of that name if it is near, else the nearest
+      if (best) { best.port = true; C.port[key] = best; }
+    }
+    C.about = d.about; C.ready = true; M.coast = null;
+  }
+  function onLand(x, y) {   // a point of the map, in kilometres
+    const B = C.band; if (x < C.gx0 || y < C.gy0 || x > C.gx1 || y > C.gy1) return true;
+    const b = Math.min(B.n - 1, Math.floor((y - C.gy0) * B.inv)), E = B.E; let odd = false;
+    for (let q = B.start[b]; q < B.start[b + 1]; q++) { const e = 4 * B.list[q], ya = E[e + 1], yb = E[e + 3]; if ((ya > y) !== (yb > y) && x < E[e] + (y - ya) * (E[e + 2] - E[e]) / (yb - ya)) odd = !odd; }
+    return odd;
+  }
+  const landAt = (lon, lat) => (C.ready ? onLand(toX(lon), toY(lat)) : StlNav.landAt(M.world, lon, lat) > 0.5);
+  function coastWindow(lv, vx0, vy0, vx1, vy1) {   // the land, lakes and rivers near the window, about a point of their own
+    const wn = C.win[lv]; if (wn && vx0 >= wn.x0 && vy0 >= wn.y0 && vx1 <= wn.x1 && vy1 <= wn.y1 && (vx1 - vx0) * 8 > wn.x1 - wn.x0) return wn;
+    const px = 0.75 * (vx1 - vx0), py = 0.75 * (vy1 - vy0), x0 = vx0 - px, x1 = vx1 + px, y0 = vy0 - py, y1 = vy1 + py, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const land = new Path2D(), lakes = new Path2D(), rivers = new Path2D(), out = q => q.x1 < x0 || q.x0 > x1 || q.y1 < y0 || q.y0 > y1, r = lv ? 0 : 0.02;
+    const add = (P, p, r) => { if (r > 0) { addLine(P, p, true, cx, cy, r); return; } P.moveTo(p[0] - cx, p[1] - cy); for (let i = 2; i < p.length; i += 2) P.lineTo(p[i] - cx, p[i + 1] - cy); P.closePath(); };
+    for (const q of C.rings[lv]) { if (out(q)) continue; const p = q.x0 >= x0 && q.x1 <= x1 && q.y0 >= y0 && q.y1 <= y1 ? q.p : clipRing(q.p, x0, y0, x1, y1); if (p.length >= 6) add(land, p, r); }
+    for (const q of C.lakes) if (!out(q) && (lv < 2 || q.area > 12)) add(lakes, q.p, r);
+    for (const q of C.rivers) if (!out(q)) addLine(rivers, q.p, false, cx, cy, 0);
+    return (C.win[lv] = { x0, y0, x1, y1, cx, cy, land, lakes, rivers });
+  }
+  function drawLand(mpp) {
+    const v = M.view, hw = W / (2 * v.s), hh = Hh / (2 * v.s), LAKE = 'rgb(62,76,80)', e = 1.5 / v.s, lv = mpp < 60 ? 0 : mpp < 260 ? 1 : 2;
+    const wn = coastWindow(lv, v.x - hw, v.y - hh, v.x + hw, v.y + hh), cx = wn.cx, cy = wn.cy;
+    ctx.setTransform(v.s * dpr, 0, 0, v.s * dpr, (W / 2 + (cx - v.x) * v.s) * dpr, (Hh / 2 + (cy - v.y) * v.s) * dpr);
+    ctx.fillStyle = LAND; ctx.fill(wn.land);
+    ctx.save(); ctx.beginPath(); ctx.rect(C.gx0 + e - cx, C.gy0 + e - cy, C.gx1 - C.gx0 - 2 * e, C.gy1 - C.gy0 - 2 * e); ctx.clip();   // a darker line along the coast, but not along the edge of the map
+    ctx.lineJoin = lv ? 'bevel' : 'round'; ctx.lineWidth = 1.3 / v.s; ctx.strokeStyle = 'rgba(52,50,42,0.9)'; ctx.stroke(wn.land);
+    ctx.fillStyle = LAKE; ctx.fill(wn.lakes); ctx.lineWidth = Math.max(1.1 / v.s, 0.03); ctx.strokeStyle = LAKE; ctx.stroke(wn.rivers);
+    ctx.restore(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function drawNames(X, Y, mpp, far) {   // towns on the land and names at sea; the larger the place, the farther out it shows, and no name is written over another
+    const w = M.world, boxes = [], free = (x, y, bw) => { for (const b of boxes) if (x < b[0] + b[2] + 6 && x + bw + 6 > b[0] && Math.abs(y - b[1]) < 15) return false; boxes.push([x, y, bw]); return true; };
+    const write = (name, px, py, bw, fill, halo) => {
+      const lf = px > W * 0.6, tx = px + (lf ? -8 - bw : 8), ty = py - 9; if (!free(tx, ty, bw)) return;
+      ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(px, py, 2.2, 0, TAU); ctx.fill();
+      ctx.textAlign = 'left'; ctx.lineWidth = 3; ctx.strokeStyle = halo; ctx.strokeText(name, tx, ty); ctx.fillText(name, tx, ty);
+    };
+    ctx.lineJoin = 'round';
+    if (far > 0) {
+      ctx.globalAlpha = far;
+      for (const name in LABELS) { if (C.port[name]) continue; const px = X(toX(w.places[name][1])), py = Y(toY(w.places[name][0])); write(LABELS[name], px, py, ctx.measureText(LABELS[name]).width, '#f2f6f7', 'rgba(8,30,40,0.75)'); }
+      ctx.globalAlpha = 1;
+    }
+    let n = 0;
+    for (let pass = 0; pass < 2; pass++) for (const t of C.towns) {
+      if (pass === 0 ? !t.port : t.port || !(t.rank === 0 ? mpp < 2500 : t.rank === 1 ? mpp < 300 || (t.pop >= 5000 && mpp < 800) : mpp < 110)) continue;
+      const px = X(t.x), py = Y(t.y); if (px < -60 || py < -20 || px > W + 60 || py > Hh + 20 || n > 70) continue;
+      if (!t.w) t.w = ctx.measureText(t.name).width;
+      write(t.name, px, py, t.w, t.port ? '#ffffff' : 'rgba(236,233,220,0.95)', 'rgba(30,29,24,0.72)'); n++;
+    }
+  }
+
   function snapshot() {   // where every ship of the traffic is, now and one step ago, so that they can be drawn in between
     const ts = M.s.traffic, n = ts.n, mk = () => ({ lon: new Float64Array(n), lat: new Float64Array(n), hd: new Float64Array(n), on: new Uint8Array(n) });
     const p = M.pos || (M.pos = mk()), q = M.prev || (M.prev = mk());
@@ -465,25 +757,61 @@
     const w = M.world, nav = M.nav = StlNav.voyage(w, M.voyage), p = nav.path, e = p[p.length - 1];
     const th = Math.atan2((p[1].lat - p[0].lat) * KY, (p[1].lon - p[0].lon) * KY * Math.cos(p[0].lat * RAD));
     sim = null; M.mode = 'model'; M.trail = []; M.hist = []; M.histAcc = 0; M.done = false; M.status = ''; M.acc = 0; M.info = null; M.pos = M.prev = null; M.byHand = false; M.stuck = 0;
-    M.s = StlNav.reset(w, { lon: p[0].lon, lat: p[0].lat, th, goalLon: e.lon, goalLat: e.lat, cls: 0, seed: M.seed });
+    // The model's coast has cells of 2 km, so the water cell nearest a port can lie on the finer land that is drawn: leave from the first
+    // point of the route that has water for 300 m around.
+    const dry = q => { if (landAt(q.lon, q.lat)) return true; for (let a = 0; a < 6; a++) if (landAt(q.lon + 0.3 * Math.cos(a * TAU / 6) / (KY * Math.cos(q.lat * RAD)), q.lat + 0.3 * Math.sin(a * TAU / 6) / KY)) return true; return false; };
+    for (let q = 0; q < 80 && dry(p[0]); q++) { const d = distKm(p[0].lon, p[0].lat, p[1]); if (d < 0.3) break; p[0] = { lon: p[0].lon + (p[1].lon - p[0].lon) * 0.1 / d, lat: p[0].lat + (p[1].lat - p[0].lat) * 0.1 / d }; }
+    if (C.ready) {
+      // The same goes for the other end, and for a leg that crosses an island too small for the model's cells (there is one before
+      // Sept-Îles): such a leg gets one more point, to the side of what blocks it, which the ship passes close by.
+      const n1 = p.length - 1, at = (a, b, t) => ({ lon: a.lon + (b.lon - a.lon) * t, lat: a.lat + (b.lat - a.lat) * t });
+      for (let q = 0; q < 80 && landAt(p[n1].lon, p[n1].lat); q++) { const d = distKm(p[n1].lon, p[n1].lat, p[n1 - 1]); if (d < 0.3) break; p[n1] = at(p[n1], p[n1 - 1], 0.1 / d); }
+      const blocked = (a, b, port) => {   // the stretch of the leg from a to b that is on land or within 150 m of it, as two shares of its length; near a port only land itself counts
+        const d = distKm(a.lon, a.lat, b), n = Math.max(1, Math.ceil(d / 0.15)), c = Math.cos(a.lat * RAD); let t0 = -1, t1 = -1;
+        for (let q = 0; q <= n; q++) {
+          const g = at(a, b, q / n); let hit = landAt(g.lon, g.lat);
+          if (!hit && !(port && d * (1 - q / n) < 1.5)) for (let k = 0; k < 4 && !hit; k++) hit = landAt(g.lon + 0.15 * Math.cos(k * TAU / 4) / (KY * c), g.lat + 0.15 * Math.sin(k * TAU / 4) / KY);
+          if (hit) { if (t0 < 0) t0 = q / n; t1 = q / n; }
+        }
+        return t0 < 0 ? null : [t0, t1];
+      };
+      for (let i = 0; i + 1 < p.length && p.length < 40; i++) {
+        const a = p[i], b = p[i + 1], port = i + 2 === p.length, hit = blocked(a, b, port); if (!hit) continue;
+        const m = at(a, b, (hit[0] + hit[1]) / 2), c = Math.cos(m.lat * RAD), hd = Math.atan2((b.lat - a.lat) * KY, (b.lon - a.lon) * KY * c); let found = null;
+        for (let k = 1; k <= 24 && !found; k++) for (const side of [1, -1]) {
+          const g = { lon: m.lon - side * k * 0.4 * Math.sin(hd) / (KY * c), lat: m.lat + side * k * 0.4 * Math.cos(hd) / KY, reach: 0.5 };
+          if (!dry(g) && !blocked(a, g, false) && !blocked(g, b, port)) { found = g; break; }
+        }
+        if (found) p.splice(i + 1, 0, found);
+      }
+    }
+    const e2 = p[p.length - 1];
+    M.s = StlNav.reset(w, { lon: p[0].lon, lat: p[0].lat, th, goalLon: e2.lon, goalLat: e2.lat, cls: 0, seed: M.seed });
+    ICE.dx = ICE.dy = 0; ICE.seed = M.seed * 131; ICE.tiles.clear(); ICE.cut = []; ICE.sim = null; ICE.gk.clear();
     M.own0 = { lon: M.s.lon, lat: M.s.lat, th: M.s.th }; snapshot(); snapshot();
     M.zoomGoal = 0; M.view.s = voyageZoom(); M.view.x = toX(M.s.lon); M.view.y = toY(M.s.lat); setFollow(true); readouts();
   }
 
   // ---------------------------------------------------------------- the two engines
-  const SMP = {}, HERE = {};
-  function chartAt(x, y) {   // the chart at a point of the ice-breaking simulator's own frame (metres), for the ice it makes around the ship
-    const s = M.s, dx = x - L0.x, dy = y - L0.y, c = Math.cos(L0.th0), sn = Math.sin(L0.th0);
-    StlNav.sample(M.world, s.lon + (dx * c + dy * sn) / (1000 * KY * Math.cos(s.lat * RAD)), s.lat + (dx * sn - dy * c) / (1000 * KY), s.t, SMP);
-    return { conc: SMP.conc, h: SMP.thick };
+  const SMP = {}, HERE = {}, QI = { conc: 0, h: 0 };
+  const PILOT = { land: (lon, lat) => landAt(lon, lat) };   // the pilot keeps off the land that is drawn
+  function iceAt(X, Y) {   // what the chart has at a point of the ice's plane (metres): as StlNav.sample reads it, without the currents and the wind
+    const w = M.world, g = w.g, fx = clamp((X + ICE.dx) / (1000 * M.kx * g.dlon), 0, g.nx - 1), fy = clamp(g.ny - 1 - (Y + ICE.dy) / (1000 * KY * g.dlat), 0, g.ny - 1);
+    const i = Math.min(fx | 0, g.nx - 2), j = Math.min(fy | 0, g.ny - 2), ax = fx - i, ay = fy - j, q = j * g.nx + i, c = w.conc, d = w.ind, n = g.nx;
+    QI.conc = (c[q] * (1 - ax) + c[q + 1] * ax) * (1 - ay) + (c[q + n] * (1 - ax) + c[q + n + 1] * ax) * ay;
+    QI.h = w.thick * ((d[q] * (1 - ax) + d[q + 1] * ax) * (1 - ay) + (d[q + n] * (1 - ax) + d[q + n + 1] * ax) * ay); return QI;
   }
   function enterPhysics() {   // the view is close: from here the ice-breaking simulator moves the ship
     const s = M.s, w = M.world; StlNav.sample(w, s.lon, s.lat, s.t, HERE);
-    L0.x = 0; L0.y = 0; L0.th0 = s.th; L0.checked = 0; L0.fade = 0;
-    sim = IceSim.create({ scenario: 'field', seed: M.seed * 131 + (L0.patches++), h: Math.max(HERE.thick, 0.05), sigF: w.sigF, u0: s.v, field: { at: chartAt } });
+    // The simulator works on the ice's plane, east along x and south along y, from an origin a whole number of chunks away; so the ice
+    // it makes into bodies is the ice that was drawn there a moment ago. Its headings turn the other way from the map's.
+    const X = 1000 * toX(s.lon) - ICE.dx, Y = 1000 * toY(s.lat) - ICE.dy; ICE.ox = Math.floor(X / CH) * CH; ICE.oy = Math.floor(Y / CH) * CH;
+    sim = IceSim.create({ scenario: 'field', seed: ICE.seed, h: Math.max(HERE.thick, 0.05), sigF: w.sigF, u0: s.v, x0: X - ICE.ox, y0: Y - ICE.oy, th0: -s.th,
+      field: { origin: [ICE.ox, ICE.oy], first: 140, at: (x, y) => iceAt(x + ICE.ox, y + ICE.oy) } });   // the ice near the hull now, the rest of the bodies over the next frames: it is drawn all the same
+    L0.x = sim.ship.x; L0.y = sim.ship.y; L0.checked = 0; ICE.sim = null; ICE.gk.clear();
     sim.ship.thr = M.thr; M.mode = 'physics'; M.stuck = 0; M.acc = 0; wake.length = 0; trace.fill(0); trPos = trCount = 0; trClock = 0; firstFrame = true; setTrace();
   }
-  function leavePhysics() { sim = null; M.mode = 'model'; M.acc = 0; M.own0 = { lon: M.s.lon, lat: M.s.lat, th: M.s.th }; M.byHand = false; setTrace(); }
+  function leavePhysics() { sim = null; ICE.sim = null; ICE.gk.clear(); M.mode = 'model'; M.acc = 0; M.own0 = { lon: M.s.lon, lat: M.s.lat, th: M.s.th }; M.byHand = false; setTrace(); }
   function finish(info, el) {
     if (info.arrived) { M.done = true; M.status = 'Arrived after ' + el + '.'; }
     else if (info.collision) { M.done = true; M.status = 'Collision with another ship after ' + el + '. Restart to sail again.'; }
@@ -493,6 +821,8 @@
   function record(speed, conc, dt) {   // the trail on the map, and the history of speed (one point per minute of ship time)
     const s = M.s, x = toX(s.lon), y = toY(s.lat), t = M.trail, n = t.length;
     if (n < 2 || Math.hypot(x - t[n - 2], y - t[n - 1]) > (M.mode === 'physics' ? 0.04 : 1.2)) t.push(x, y);
+    const c = ICE.cut, m = c.length, X = 1000 * x - ICE.dx, Y = 1000 * y - ICE.dy;                  // and the channel, which stays with the ice
+    if (m < 2 || Math.hypot(X - c[m - 2], Y - c[m - 1]) > (M.mode === 'physics' ? 8 : 250)) c.push(X, Y);
     M.histAcc += dt; if (M.histAcc < 60) return; M.histAcc = 0; M.hist.push(speed, conc);
     if (M.hist.length > 8000) M.hist = M.hist.filter((v, i) => i % 4 < 2);
   }
@@ -501,7 +831,8 @@
     const w = M.world, dt = w.cfg.dt; M.acc += dtReal * M.rate;
     for (let n = 0; M.acc >= dt && n < 200 && !M.done; n++) {
       const s = M.s; M.acc -= dt; M.own0 = { lon: s.lon, lat: s.lat, th: s.th };
-      const info = M.info = StlNav.step(w, s, StlNav.pilot(w, s, M.nav, Math.max(M.thr, 0))); snapshot();
+      const info = M.info = StlNav.step(w, s, StlNav.pilot(w, s, M.nav, Math.max(M.thr, 0), PILOT)); snapshot();
+      if (C.ready) info.aground = landAt(s.lon, s.lat);                                              // the land that is drawn, not the model's cells of 2 km
       record(info.speed, info.conc > 0.01 && info.thick > 0.01 ? info.conc : 0, dt);
       if (!finish(info, hm(s.t - s.t0))) M.status = info.vGoal === 0 && M.thr > 0 && info.conc > 0.01 ? 'Stopped by the ice. Open the throttle, or send the ship around.' : M.nav.avoiding ? 'Keeping clear of another ship.' : '';
     }
@@ -514,9 +845,9 @@
     else if (M.byHand) sh.rudCmd = 0;
     if (M.byHand) sh.thr = M.thr;
     else {   // the route's pilot says where to head; the simulator's autopilot holds that heading with the rudder
-      const a = StlNav.pilot(w, s, M.nav, Math.max(M.thr, 0)), ap = sim.ap, tg = M.nav.tgt; ap.on = true; ap.hasTarget = false; sh.thr = M.thr < 0 ? M.thr : a[0];
+      const a = StlNav.pilot(w, s, M.nav, Math.max(M.thr, 0), PILOT), ap = sim.ap, tg = M.nav.tgt; ap.on = true; ap.hasTarget = false; sh.thr = M.thr < 0 ? M.thr : a[0];
       if (M.nav.avoiding) ap.heading = sh.th + (a[1] < 0 ? 0.8 : a[1] > 0 ? -0.4 : 0);
-      else ap.heading = L0.th0 - Math.atan2((tg.lat - s.lat) * KY, (tg.lon - s.lon) * KY * Math.cos(s.lat * RAD));
+      else ap.heading = -Math.atan2((tg.lat - s.lat) * KY, (tg.lon - s.lon) * KY * Math.cos(s.lat * RAD));
     }
     sim.accX = 0; sim.accN = 0;
     const k = IceSim.advance(sim, dtReal * M.rate), dt = k * sim.dt; IceSim.follow(sim);
@@ -526,12 +857,15 @@
     trClock += dt; if (trClock >= 1 / 30) { trace[trPos] = -sim.accX / sim.accN; trPos = (trPos + 1) % TR_N; if (trCount < TR_N) trCount++; trClock = 0; }
     if (Math.abs(sh.u) > 0.4 && sh.thr > 0.05) for (let q = 0; q < 2; q++) { const c = Math.cos(sh.th), sn = Math.sin(sh.th), by = (q ? 3.2 : -3.2) + (Math.random() - 0.5) * 2, bx = -sh.L / 2 - 1; wake.push({ x: sh.x + c * bx - sn * by, y: sh.y + sn * bx + c * by, vx: -c * 1.5 * sh.thr, vy: -sn * 1.5 * sh.thr, age: 0, life: 5 + 3 * Math.random() }); }
     let nw = 0; for (let i = 0; i < wake.length; i++) { const p = wake[i]; p.age += dt; if (p.age >= p.life) continue; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.97; p.vy *= 0.97; wake[nw++] = p; } wake.length = nw;
-    // where that puts the ship on the map: its own motion in the simulator's frame, plus the drift of the water
-    const dx = sh.x - L0.x, dy = sh.y - L0.y, c = Math.cos(L0.th0), sn = Math.sin(L0.th0); L0.x = sh.x; L0.y = sh.y; L0.fade = Math.min(1, L0.fade + dtReal * 2.5);
+    // Where that puts the ship on the map: its own motion over the ice, plus the drift of the water. The ice's plane is then moved under the
+    // ship by what is left over: the drift, and the small stretch of the map from east to west away from its middle latitude.
+    const dx = sh.x - L0.x, dy = sh.y - L0.y; L0.x = sh.x; L0.y = sh.y;
     StlNav.sample(w, s.lon, s.lat, s.t, HERE);
-    const east = dx * c + dy * sn + HERE.uc * dt, north = dx * sn - dy * c + HERE.vc * dt;
-    s.lon += east / (1000 * KY * Math.cos(s.lat * RAD)); s.lat += north / (1000 * KY); s.th = L0.th0 - sh.th; s.v = sh.u;
+    const east = dx + HERE.uc * dt, north = -dy + HERE.vc * dt;
+    s.lon += east / (1000 * KY * Math.cos(s.lat * RAD)); s.lat += north / (1000 * KY); s.th = -sh.th; s.v = sh.u;
+    ICE.dx = 1000 * toX(s.lon) - ICE.ox - sh.x; ICE.dy = 1000 * toY(s.lat) - ICE.oy - sh.y;
     const info = M.info = StlNav.follow(w, s, dt, east / dt, north / dt), ice = HERE.conc > 0.01 && HERE.thick > 0.01; snapshot();
+    if (C.ready) { const b = 0.5 * sh.L / 1000; info.aground = landAt(s.lon, s.lat) || landAt(s.lon + b * Math.cos(s.th) / (KY * Math.cos(s.lat * RAD)), s.lat + b * Math.sin(s.th) / KY); }
     info.conc = HERE.conc; info.thick = HERE.thick; record(sh.u, ice ? HERE.conc : 0, dt);
     if (sim.t - L0.checked > 1.5) {   // the thickness under the ship as the chart has it
       L0.checked = sim.t; const h = Math.max(HERE.thick, 0.05); if (Math.abs(h - sim.P.h) > 0.01) { sim.P.h = h; sim.Rs0 = IceSim.lindqvist(sim, h, 0).Rs; }
@@ -578,14 +912,19 @@
     if (M.follow) { v.x = mx; v.y = my; }
     const X = x => (x - v.x) * v.s + W / 2, Y = y => (y - v.y) * v.s + Hh / 2, k = v.s / 1000, mpp = 1 / k, sx = X(mx), sy = Y(my);   // k: pixels per metre
     const far = clamp((mpp - 12) / 28, 0, 1);                                                    // 1 where the view is a map, 0 where it is a close view
-    // the chart: sea, ice by concentration, land
+    const det = 1 - clamp((mpp - DETAIL) / (0.6 * DETAIL), 0, 1);                                 // 1 where single floes are drawn, 0 where the chart's colour stands for them
+    // the chart: sea and ice by concentration
     const ix = X(-0.5 * g.dlon * M.kx), iy = Y(-0.5 * g.dlat * KY), iw = g.nx * g.dlon * M.kx * v.s, ih = g.ny * g.dlat * KY * v.s;
-    ctx.fillStyle = col.sea; ctx.fillRect(ix, iy, iw, ih); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(M.img, ix, iy, iw, ih);
-    if (M.fine) { const f = M.fine; ctx.fillRect(X(f.x0), Y(f.y0), f.w * v.s, f.h * v.s); ctx.drawImage(f.canvas, X(f.x0), Y(f.y0), f.w * v.s, f.h * v.s); }
-    if (M.coast) {                                                                                // the land, as a shape with a sharp edge
+    ctx.fillStyle = col.sea; ctx.fillRect(ix, iy, iw, ih); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = mpp > 500 ? 'high' : 'low';   // enlarged, a picture needs no more than the plain rule
+    if (det < 1) { if (M.fine) { const f = M.fine; ctx.drawImage(f.canvas, X(f.x0), Y(f.y0), f.w * v.s, f.h * v.s); } else ctx.drawImage(M.img, ix, iy, iw, ih); }
+    // the ice itself, floe by floe, when the view is close enough for it
+    if (det > 0) drawIce(k, det, ix, iy, iw, ih, 1000 * mx, 1000 * my);
+    // the land
+    if (C.ready) drawLand(mpp);
+    else if (M.coast) {                                                                           // without the coast file: the chart's own land, as a shape
       ctx.setTransform(v.s * dpr, 0, 0, v.s * dpr, (W / 2 - v.x * v.s) * dpr, (Hh / 2 - v.y * v.s) * dpr);
       ctx.fillStyle = LAND; ctx.fill(M.coast, 'evenodd');
-      const f = M.fine, e = 1.5; ctx.save(); ctx.beginPath(); ctx.rect(f.x0 + e, f.y0 + e, f.w - 2 * e, f.h - 2 * e); ctx.clip();   // a darker line along the coast, but not along the edge of the picture
+      const f = M.fine, e = 1.5; ctx.save(); ctx.beginPath(); ctx.rect(f.x0 + e, f.y0 + e, f.w - 2 * e, f.h - 2 * e); ctx.clip();
       ctx.lineJoin = 'round'; ctx.lineWidth = 1.3 / v.s; ctx.strokeStyle = 'rgba(52,50,42,0.9)'; ctx.stroke(M.coast); ctx.restore();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
@@ -596,64 +935,35 @@
       for (let q = 0; q < rt.lon[r].length; q++) { if (q && rt.lon[r][q] === rt.lon[r][q - 1] && rt.lat[r][q] === rt.lat[r][q - 1]) break; const x = X(toX(rt.lon[r][q])), y = Y(toY(rt.lat[r][q])); if (q) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
     }
     ctx.stroke();
-    // the way come: a red line on the map, the channel left in the ice when seen from closer
+    // the way come, as a red line (the channel it left in the ice is drawn with the ice)
     if (M.trail.length > 3) {
       ctx.beginPath(); ctx.moveTo(X(M.trail[0]), Y(M.trail[1])); for (let i = 2; i < M.trail.length; i += 2) ctx.lineTo(X(M.trail[i]), Y(M.trail[i + 1])); ctx.lineTo(sx, sy); ctx.lineJoin = 'round';
-      if (far < 1) { ctx.globalAlpha = 0.8 * (1 - far); ctx.lineWidth = Math.max(2, 21 * k); ctx.strokeStyle = col.sea; ctx.stroke(); }
       ctx.globalAlpha = Math.max(far, 0.25); ctx.lineWidth = 2; ctx.strokeStyle = col.accent; ctx.stroke(); ctx.globalAlpha = 1;
     }
     if (!M.done && !M.byHand) {                                                                    // the course ahead
       const nav = M.nav; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.beginPath(); ctx.moveTo(sx, sy);
-      if (nav.manual) ctx.lineTo(X(toX(nav.manual.lon)), Y(toY(nav.manual.lat)));
-      for (let q = nav.k; q < nav.path.length; q++) ctx.lineTo(X(toX(nav.path[q].lon)), Y(toY(nav.path[q].lat)));
+      let ux = sx, uy = sy, gone = false; const reach = 2 * (W + Hh), to = (x, y) => {   // stop a little beyond the window: close up, the next waypoint is millions of pixels away
+        if (gone) return; const d = Math.hypot(x - sx, y - sy); if (d > reach) { const dd = Math.hypot(x - ux, y - uy) || 1, t = Math.min(1, reach / dd); x = ux + (x - ux) * t; y = uy + (y - uy) * t; gone = true; } ctx.lineTo(x, y); ux = x; uy = y; };
+      if (nav.manual) to(X(toX(nav.manual.lon)), Y(toY(nav.manual.lat)));
+      for (let q = nav.k; q < nav.path.length; q++) to(X(toX(nav.path[q].lon)), Y(toY(nav.path[q].lat)));
       ctx.stroke(); ctx.setLineDash([]);
       if (nav.manual) { ctx.beginPath(); ctx.arc(X(toX(nav.manual.lon)), Y(toY(nav.manual.lat)), 6, 0, TAU); ctx.stroke(); }
     }
-    // close to the ship: the ice as the simulator has it, the broken pieces, the ship itself
-    if (sim) {
-      const sh = sim.ship, c = Math.cos(L0.th0), sn = Math.sin(L0.th0), al = L0.fade; cam.s = k;
-      // the simulator's frame on the screen: its x axis points along the map heading th0, and its ship sits where the map has the ship
-      ctx.setTransform(k * c * dpr, -k * sn * dpr, k * sn * dpr, k * c * dpr, (sx - k * (c * sh.x + sn * sh.y)) * dpr, (sy - k * (-sn * sh.x + c * sh.y)) * dpr);
-      let x0 = 1e18, y0 = 1e18, x1 = -1e18, y1 = -1e18;                                           // the part of that frame the window shows
-      for (let q = 0; q < 4; q++) { const ex = ((q & 1 ? W : 0) - sx) / k, ey = ((q & 2 ? Hh : 0) - sy) / k, lx = sh.x + c * ex - sn * ey, ly = sh.y + sn * ex + c * ey; x0 = Math.min(x0, lx); x1 = Math.max(x1, lx); y0 = Math.min(y0, ly); y1 = Math.max(y1, ly); }
-      ctx.globalAlpha = al;
-      for (const key of sim.field.chunks) {                                                       // water under every piece of the field that has been made
-        const q = key.split(','), cx = +q[0] * CH, cy = +q[1] * CH; if (cx > x1 || cx + CH < x0 || cy > y1 || cy + CH < y0) continue;
-        const dx = cx + CH / 2 - sh.x, dy = cy + CH / 2 - sh.y;
-        if (StlNav.landAt(w, s.lon + (dx * c + dy * sn) / (1000 * KY * Math.cos(s.lat * RAD)), s.lat + (dx * sn - dy * c) / (1000 * KY)) > 0.5) continue;
-        ctx.fillStyle = col.sea; ctx.fillRect(cx, cy, CH, CH); if (waterPat) { ctx.fillStyle = waterPat; ctx.fillRect(cx, cy, CH, CH); }
-      }
-      for (let i = 0; i < wake.length; i++) { const p = wake[i], t = p.age / p.life; ctx.fillStyle = 'rgba(205,234,240,' + (0.2 * (1 - t) * (1 - t)).toFixed(3) + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, 1 + 4.5 * t, 0, 6.2832); ctx.fill(); }
-      drawPieces(true, x0, y0, x1, y1);
-      const budget = { n: firstFrame ? 40 : 10 }, m = 24;                                           // new ice textures per frame, nearest first
-      for (const S of sim.sheets) { if (S.x + S.R < x0 - m || S.x - S.R > x1 + m || S.y + S.R < y0 - m || S.y - S.R > y1 + m) continue; drawSheet(S, x0 - m, y0 - m, x1 + m, y1 + m, budget); }
-      drawPieces(false, x0, y0, x1, y1);
-      // The field ends some way from the ship, where the chart's flat colour takes over. Fade into that colour instead of showing the edge.
-      const here = M.info && M.info.conc !== undefined ? M.info : chartAt(sh.x, sh.y), ai = 0.96 * Math.min(1, here.conc), sea = seaRGB(), R1 = here.conc >= 0.895 ? 400 : 235;
-      const tint = [0, 1, 2].map(q => Math.round([236, 243, 246][q] * ai + sea[q] * (1 - ai))).join(','), gr = ctx.createRadialGradient(sh.x, sh.y, 0.5 * R1, sh.x, sh.y, R1);
-      gr.addColorStop(0, 'rgba(' + tint + ',0)'); gr.addColorStop(1, 'rgba(' + tint + ',1)');
-      ctx.globalAlpha = al; ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(sh.x, sh.y, 3 * R1, 0, TAU); ctx.arc(sh.x, sh.y, 0.5 * R1, 0, TAU, true); ctx.fill();
-      ctx.globalAlpha = al; drawShip(); if (showLoads) drawLoads();
-      firstFrame = false; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalAlpha = 1;
+    if (sim) {                                                                                    // the ship of the simulator, in the simulator's metres
+      ctx.setTransform(k * dpr, 0, 0, k * dpr, (ICE.tx + k * (ICE.ox - ICE.ax)) * dpr, (ICE.ty + k * (ICE.oy - ICE.ay)) * dpr);
+      drawShip(); if (showLoads) drawLoads(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     // the other ships, and the own ship when the simulator is not drawing it
     const ts = s.traffic, p = M.pos, q = M.prev, len = clamp(5 + v.s * 2.2, 7, 13);
     for (let i = 0; i < ts.n; i++) {
       if (!p.on[i]) continue;
       const jump = !q.on[i] || Math.abs(p.lon[i] - q.lon[i]) + Math.abs(p.lat[i] - q.lat[i]) > 0.05, b = jump ? 1 : a, cl = w.classes[ts.cls[i]];   // a slot that has just been given a new ship is not drawn in between
-      const x = X(toX(q.lon[i] + (p.lon[i] - q.lon[i]) * b)), y = Y(toY(q.lat[i] + (p.lat[i] - q.lat[i]) * b)); if (x < -200 || y < -200 || x > W + 200 || y > Hh + 200) continue;
+      const xm = toX(q.lon[i] + (p.lon[i] - q.lon[i]) * b), ym = toY(q.lat[i] + (p.lat[i] - q.lat[i]) * b), x = X(xm), y = Y(ym); if (x < -200 || y < -200 || x > W + 200 || y > Hh + 200) continue;
+      if (C.ready && onLand(xm, ym)) continue;                                                    // the last few hundred metres of a route, where the model's port lies on the finer land
       if (cl.L * k > 9) hullGlyph(x, y, p.hd[i], cl.L, cl.B, k, SHIP_COL[cl.name] || '#0f2530'); else glyph(x, y, p.hd[i], len, SHIP_COL[cl.name] || '#0f2530');
     }
     if (!sim) { const cl = w.classes[s.cls]; if (cl.L * k > 9) hullGlyph(sx, sy, hd, cl.L, cl.B, k, '#bd3620'); else glyph(sx, sy, hd, len * 1.5, '#bd3620'); }
-    if (far > 0) {                                                                                // place names, written towards the middle of the window
-      ctx.lineJoin = 'round'; ctx.globalAlpha = far;
-      for (const name in LABELS) {
-        const px = X(toX(w.places[name][1])), py = Y(toY(w.places[name][0])), lf = px > W * 0.6; ctx.textAlign = lf ? 'right' : 'left';
-        ctx.fillStyle = '#f2f6f7'; ctx.beginPath(); ctx.arc(px, py, 2.2, 0, TAU); ctx.fill();
-        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(8,30,40,0.75)'; ctx.strokeText(LABELS[name], px + (lf ? -8 : 8), py - 9); ctx.fillText(LABELS[name], px + (lf ? -8 : 8), py - 9);
-      }
-      ctx.globalAlpha = 1;
-    }
+    drawNames(X, Y, mpp, far);
     const bar = [10, 20, 50, 100, 200, 500, 1e3, 2e3, 5e3, 1e4, 2e4, 5e4, 1e5, 2e5, 5e5].find(q => q * k >= 70) || 5e5, bw = bar * k, bx = W / 2 - bw / 2, by = Hh - (W > 980 ? 62 : 150);   // scale bar
     const txt = bar >= 1000 ? bar / 1000 + ' km' : bar + ' m';
     ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.moveTo(bx, by - 4); ctx.lineTo(bx, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by - 4); ctx.stroke();
@@ -801,8 +1111,8 @@
   cv.addEventListener('pointerup', e => {
     const d = down, was = touch.size; lift(e); down = null; if (!d || was !== 1 || d.moved || !M.world || M.done) return;
     const r = cv.getBoundingClientRect(), v = M.view, lon = M.lonW + (v.x + (e.clientX - r.left - W / 2) / v.s) / M.kx, lat = M.latN - (v.y + (e.clientY - r.top - Hh / 2) / v.s) / KY;
-    const s = M.s, km = distKm(s.lon, s.lat, { lon, lat }); let water = StlNav.landAt(M.world, lon, lat) < 0.5;
-    for (let q = 1; water && q < km; q++) water = StlNav.landAt(M.world, s.lon + (lon - s.lon) * q / km, s.lat + (lat - s.lat) * q / km) < 0.5;   // every kilometre of the straight line
+    const s = M.s, km = distKm(s.lon, s.lat, { lon, lat }), n = Math.ceil(km / 0.25); let water = !landAt(lon, lat);
+    for (let q = 1; water && q < n; q++) water = !landAt(s.lon + (lon - s.lon) * q / n, s.lat + (lat - s.lat) * q / n);   // every 250 m of the straight line
     if (water) { M.nav.manual = { lon, lat, reach: clamp(0.25 * km, 0.05, 2) }; M.byHand = false; } else { M.flash = 'Land lies between the ship and that place.'; M.flashUntil = performance.now() + 3500; }
     readouts();
   });
@@ -814,9 +1124,12 @@
     window.__ice = { get sim() { return sim; }, map: M, cam,
       zoomTo(mpp) { M.view.s = clamp(1000 / mpp, 0.25, 9000); },                                // metres per pixel
       run(seconds, dt) {   // for tests: let so many seconds of real time pass, without waiting for frames, then redraw
-        dt = dt || 1 / 60; for (let t = 0; t < seconds; t += dt) update(dt); draw(); readouts(); if (M.mode === 'physics') drawForce(); else drawSpeed();
-      } };
-    fetch('stl-data.json').then(r => { if (!r.ok) throw new Error('error ' + r.status); return r.json(); }).then(loadMap)
+        dt = dt || 1 / 60; for (let t = 0; t < seconds; t += dt) update(dt); this.settle(); readouts(); if (M.mode === 'physics') drawForce(); else drawSpeed();
+      },
+      settle() { let n = 0; do { frameNo++; draw(); } while ((ICE.missing || ICE.late) && ++n < 600); return n; },   // draw until all the ice in view is painted
+      ice: ICE, land: C, onLand };
+    const get = f => fetch(f).then(r => { if (!r.ok) throw new Error('error ' + r.status); return r.json(); });
+    Promise.all([get('stl-data.json'), get('stl-coast.json').catch(() => null)]).then(q => loadMap(q[0], q[1]))   // without the coast file, the land is the chart's
       .catch(e => { M.error = 'The St. Lawrence could not be loaded (' + e.message + ').'; });
     requestAnimationFrame(frame);
   }
