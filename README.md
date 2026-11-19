@@ -5,6 +5,29 @@ A fast, top-down simulation of a ship breaking sea ice, in two versions:
 - **A browser simulator** ([live page](https://pierrelucbacon.com/icebreaker-lab/)): a 76 m icebreaker in a continuous ice sheet, large floes or broken pack, with a live trace of the ice force on the hull. Click the ice to set a course, or steer with A/D and W/S.
 - **A JAX environment** (`icebreaker_jax.py`): the continuous-sheet physics with fixed array shapes, so `reset` and `step` jit-compile and vmap over thousands of environments.
 
+## Two scales
+
+| | Hull scale | Route scale |
+|---|---|---|
+| Code | `icebreaker-core.js`, `icebreaker_jax.py` | `stlnav/` |
+| Domain | 600 m × 240 m, 0.5 m grid | Estuary and Gulf of St. Lawrence, 2 km grid |
+| Step | 0.2 s (physics at 360 Hz) | 60 s |
+| Ice | A sheet that the hull crushes and bends | Concentration and thickness fields from the Canadian ice-ocean forecast (CIOPS-East) or ice charts |
+| Ship | 3 degrees of freedom, forces on the waterline | A point with a heading; speed from a resistance formula |
+| Other ships | none | Generated traffic on real routes |
+
+The route-scale environment is described in [docs/st-lawrence-plan.md](docs/st-lawrence-plan.md) (section "What is built"), with what is sourced and what is a placeholder. Its speed model is not validated: transit times it gives are model output. To check and run it:
+
+```bash
+uv run --no-project --python 3.12 --with jax --with numpy python checks/stlnav_checks.py data/fields_20261117.npz
+```
+
+```bash
+uv run --no-project --python 3.12 --with jax --with xarray --with 'netCDF4<1.7.5' --with scipy --with matplotlib python -m stlnav.demo --cache data/fields_20261117.npz --ice data/ice_hist/sic_2026-02-15.nc
+```
+
+`data/` is not in the repository: the fields come from the archive that `archiver/stl_archive.py` builds on the Mila cluster.
+
 ## How the ice breaks
 
 The hull waterline is sampled every 0.5 m and tested against the ice, which is stored as a signed-distance field on a 0.5 m grid. Where they overlap, the ice edge is crushed at a fixed pressure on the sloping hull face, which pushes the edge down as well as back. When the downward force on a contact zone exceeds the bearing capacity of the ice wedge,
