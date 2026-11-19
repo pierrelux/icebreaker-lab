@@ -104,11 +104,13 @@ The table records the hull-scale constants it was measured with. If one of them 
 
 The page is one view of one ship on one clock. The camera sits on the map and zooms from the whole Gulf (1 km per pixel) down to the hull (a few centimetres per pixel). Which simulator moves the ship follows the zoom:
 
-| | Far out | Close to the ship (under 6 m per pixel) |
+| | Far out | Close to the ship (under 10 m per pixel) |
 |---|---|---|
 | What moves the ship | the route-scale model, `stlnav-core.js` | the ice-breaking simulator, `icebreaker-core.js` |
 | Clock | 30 times real time up to 2 hours per second, faster the further out | 1 to 4 times real time |
 | Ice | the chart | level ice or floes made from the chart at the ship's place |
+
+A slider and two buttons, "Zoom to the hull" and "Whole voyage", move between the two ends; the page says how much closer the view has to be for the ice to break.
 
 The clock has to follow the zoom. Breaking ice is computed 360 times per second of the ship's time, which a browser manages at about the speed of a clock, and a voyage lasts 11 hours. Far out, the ship therefore moves with the model that the section above fits to the ice-breaking computation, so its speed does not jump when the two swap: in one run, the model had the ship at 7.48 m/s in 90% ice of 0.30 m, and the ice-breaking simulator held 7.46 to 7.49 m/s after taking over.
 
@@ -116,9 +118,9 @@ The clock has to follow the zoom. Breaking ice is computed 360 times per second 
 
 What is real and what is invented close to the ship: the share of ice and its (assumed) thickness come from the chart, cell by cell. The shapes of the floes are invented, because the chart only gives a share per kilometre. The coast is a smooth outline from 1 km data. Other ships are drawn but do not break ice.
 
-**The route-scale model in JavaScript.** `stlnav-core.js` is a port of `stlnav/ships.py`, `traffic.py` and `env.py`. It copies no number by hand: the fields, routes, ship classes, hull-scale table and settings all come from `stl-data.json` (760 kB, 160 kB compressed), which `stlnav/export_web.py` writes. The fields are reduced for the page: currents every 6 km and wind every 16 km, in 9 frames 3 hours apart, and the day repeats.
+**The route-scale model in JavaScript.** `stlnav-core.js` is a port of `stlnav/ships.py`, `traffic.py` and `env.py`. It copies no number by hand: the fields, routes, ship classes, hull-scale table and settings all come from `stl-data.json` (810 kB, 180 kB compressed), which `stlnav/export_web.py` writes. The fields are reduced for the page: currents every 6 km and wind every 16 km, in 9 frames 3 hours apart, and the day repeats.
 
-The map is not drawn from the model's 2 km cells, which look like squares on a screen. `export_web.py` also writes `stl-map.png` (18 kB), the same chart on its own grid of about 1 km, and the page spreads each cell over 2 × 2 pixels with a light smoothing, so that coasts and ice edges come out as lines. The picture is only drawn: the model still works on 2 km cells, so within a cell of the coast the ship can be stopped by land that the picture shows as water.
+The map is not drawn from the model's 2 km cells, which look like squares on a screen. `export_web.py` also writes `stl-map.png` (18 kB), the same chart on its own grid of about 1 km, and the page draws the ice from it with a smoothing of the edges between ice classes. The land is not drawn from cells at all: the export traces the edge of the chart's land as 113 closed lines (4,700 points, in `stl-data.json`), and the page fills them as a shape, which has a sharp edge at any zoom. That coast is still only as detailed as the chart, about 1 km. All of this is only drawn: the model works on 2 km cells, so within a cell of the coast the ship can be stopped by land that the picture shows as water.
 
 `checks/stlnav_js.py` runs the Python model on the page's data and compares the port with it (8 checks, all passing):
 

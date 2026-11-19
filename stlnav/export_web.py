@@ -18,6 +18,9 @@ to three times finer than the model's, so that coasts and ice edges are not draw
 byte per cell: 255 = land, else concentration * 250. Land is where the chart has no data, which follows
 the coast at 1 km. The exception is an inlet that the chart leaves out and the model has as water (at
 least 3 x 3 model cells): it is drawn as open water, which is what the model takes it for.
+
+The edge of that land also goes into stl-data.json as closed lines (`picture.coast`), which the page fills
+as a shape: a picture of 1 km cells shows as steps on a screen, a line does not.
 """
 from __future__ import annotations
 
@@ -115,6 +118,55 @@ def chart_picture(path, f: F.Fields):
                      dlon=float(lon[1] - lon[0]), dlat=float(lat[0] - lat[1]))
 
 
+def coast_rings(land, q=8):
+    """The coast of a land mask as closed lines, so that the page can draw land as a shape with a sharp edge at any zoom.
+
+    land: [ny, nx] bool, north at the top. Returns a list of rings, each a flat list [x0, y0, x1, y1, ...] in cells of the mask
+    times q (integers; x along columns, y along rows from the top). Filling all of them by the even-odd rule gives the land.
+    The rings follow the cells' edges at half-way points, are then rounded by a little averaging along the line (small islands
+    are left as they are, or they would shrink away), and are thinned to within an eighth of a cell.
+    """
+    from contourpy import FillType, contour_generator
+
+    pad = 2
+    z = np.pad(land.astype(np.float64), pad, mode="edge")
+    polys, codes = contour_generator(z=z, fill_type=FillType.OuterCode).filled(0.5, 2.0)
+
+    def thin(p, tol):                           # Douglas-Peucker on an open line
+        keep = np.zeros(len(p), bool); keep[[0, -1]] = True; stack = [(0, len(p) - 1)]
+        while stack:
+            a, b = stack.pop()
+            if b <= a + 1:
+                continue
+            d, seg = p[b] - p[a], p[a + 1:b] - p[a]
+            n = np.hypot(*d)
+            dist = np.abs(seg[:, 0] * d[1] - seg[:, 1] * d[0]) / n if n > 0 else np.hypot(seg[:, 0], seg[:, 1])
+            k = int(dist.argmax())
+            if dist[k] > tol:
+                keep[a + 1 + k] = True; stack += [(a, a + 1 + k), (a + 1 + k, b)]
+        return p[keep]
+
+    rings = []
+    for pts, cds in zip(polys, codes):
+        starts = list(np.flatnonzero(cds == 1)) + [len(pts)]
+        for a, b in zip(starts[:-1], starts[1:]):
+            r = pts[a:b] - pad
+            if len(r) > 1 and np.allclose(r[0], r[-1]):
+                r = r[:-1]
+            if len(r) < 3:
+                continue
+            for _ in range(min(3, len(r) // 8)):
+                r = 0.25 * np.roll(r, 1, axis=0) + 0.5 * r + 0.25 * np.roll(r, -1, axis=0)
+            if len(r) > 8:                      # thin the two halves of the ring between its first point and the one farthest from it
+                k = int(np.hypot(*(r - r[0]).T).argmax())
+                r = np.concatenate([thin(r[:k + 1], 0.125)[:-1], thin(np.concatenate([r[k:], r[:1]]), 0.125)[:-1]])
+            r = np.round(r * q).astype(int)
+            r = r[np.any(r != np.roll(r, 1, axis=0), axis=1)]
+            if len(r) >= 3:
+                rings.append(r.ravel().tolist())
+    return rings
+
+
 def write_png(path, img):
     """An 8-bit greyscale PNG, written with the standard library."""
     import struct
@@ -162,13 +214,15 @@ def main():
     f = F.with_ice(f, F.read_chart_concentration(a.ice, f), 0.3)
     d = export(f, a.ice.split("sic_")[-1][:10])
     img, d["picture"] = chart_picture(a.ice, f)
+    d["picture"]["coast"] = dict(q=8, rings=coast_rings(img == 255, 8))
     png = os.path.join(os.path.dirname(a.out), d["picture"]["file"])
     write_png(png, img)
     with open(a.out, "w") as fh:
         json.dump(d, fh, separators=(",", ":"))
     import gzip
     print(f"wrote {png}: {img.shape[1]} x {img.shape[0]} cells of {d['picture']['dlon'] * 111.195 * np.cos(np.deg2rad(48.75)):.2f} x {d['picture']['dlat'] * 111.195:.2f} km, "
-          f"{os.path.getsize(png) / 1e3:.0f} kB; land share {np.mean(img == 255):.2f}")
+          f"{os.path.getsize(png) / 1e3:.0f} kB; land share {np.mean(img == 255):.2f}; coast: {len(d['picture']['coast']['rings'])} closed lines, "
+          f"{sum(len(r) for r in d['picture']['coast']['rings']) // 2} points")
     print(f"wrote {a.out}: {os.path.getsize(a.out) / 1e3:.0f} kB, {len(gzip.compress(open(a.out, 'rb').read())) / 1e3:.0f} kB gzipped; "
           f"{len(d['routes']['name'])} routes, {len(d['classes'])} classes, {len(d['voyages'])} voyages")
 

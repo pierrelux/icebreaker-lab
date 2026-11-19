@@ -82,8 +82,10 @@
   #hint { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); margin: 0; padding: 5px 11px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line); font-family: var(--font-label); font-size: 13px; color: var(--muted); white-space: nowrap; }
   #zoom { position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); bottom: 16px; display: flex; flex-direction: column; }
   #zoom button { width: 34px; height: 34px; font-family: var(--font-data); font-size: 17px; line-height: 1; background: var(--panel); color: var(--ink); border: 1px solid var(--line); cursor: pointer; }
-  #zoom button:first-child { border-radius: 4px 4px 0 0; border-bottom: 0; }
-  #zoom button:last-child { border-radius: 0 0 4px 4px; }
+  #zoom button { width: 40px; border-bottom: 0; }
+  #zoom button.word { font-family: var(--font-label); font-size: 12.5px; font-weight: 600; }
+  #zoom button:first-child { border-radius: 4px 4px 0 0; }
+  #zoom button:last-child { border-radius: 0 0 4px 4px; border-bottom: 1px solid var(--line); }
   #toggleControls { display: none; }
   .stack { display: flex; flex-direction: column; gap: 10px; }
   #controls .stack { gap: 11px; }
@@ -129,6 +131,7 @@
       <div class="wide"><dt>Cusps broken · physics cost</dt><dd id="rBreaks">0 · 0 ms</dd></div>
     </dl>
     <div class="legend"><span><b style="background:#bd3620"></b>your icebreaker</span><span><b style="background:#0f2530"></b>cargo</span><span><b style="background:#1b6f8c"></b>ferry</span><span><b style="background:#e8a33d"></b>icebreaker</span></div>
+    <p class="note" id="cue">Zoom in on the ship to see it break the ice.</p>
     <p class="note" id="status" hidden></p>
   </section>
 
@@ -149,6 +152,15 @@
       <div class="top"><label for="thr">Throttle</label><output id="thrOut" for="thr">100 %</output></div>
       <input type="range" id="thr" min="-100" max="100" step="5" value="100">
     </div>
+    <div class="field">
+      <div class="top"><label for="zs">Zoom</label><output id="zsOut" for="zs">loading</output></div>
+      <input type="range" id="zs" min="0" max="1000" step="1" value="0">
+      <div class="row">
+        <button class="plain" id="zVoyage">Whole voyage</button>
+        <button class="plain primary" id="zHull">Zoom to the hull</button>
+      </div>
+      <p class="note" id="zNote">Close to the ship, the ice breaks for real.</p>
+    </div>
     <div class="row">
       <label class="check"><input type="checkbox" id="loads"> Show loads</label>
       <label class="check"><input type="checkbox" id="cracks" checked> Show cracks</label>
@@ -161,7 +173,7 @@
     <details>
       <summary>What you are looking at</summary>
       <p>An icebreaker on a voyage through the estuary and Gulf of St. Lawrence. Zoom out and you see the whole voyage; zoom in on the ship and you see its hull breaking the ice. It is one ship and one clock.</p>
-      <p><b>The clock follows the zoom.</b> Breaking ice is computed 360 times per second of the ship's time, which a browser manages at about the speed of a real clock. So close to the ship, time runs at 1 to 4 times real speed and the ice is broken for real. Far out, time runs up to two hours per second, and the ship moves at the speed a model fitted to that same ice-breaking computation gives.</p>
+      <p><b>The clock follows the zoom.</b> Breaking ice is computed 360 times per second of the ship's time, which a browser manages at about the speed of a real clock. So close to the ship, under 10 m per pixel, time runs at 1 to 4 times real speed and the ice is broken for real. Far out, time runs up to two hours per second, and the ship moves at the speed a model fitted to that same ice-breaking computation gives.</p>
       <p id="aboutIce">The ice is a chart of concentration for one past winter day. The chart gives no thickness, so one thickness is assumed everywhere.</p>
       <p>Close to the ship the ice is made from the chart: level ice where the chart shows 90 % or more, floes covering the chart's share of the water below that. The shapes of the floes are invented; the chart only gives a share per kilometre.</p>
       <p>The edge of level ice is crushed on the sloping hull, which pushes it down. When the downward force passes the bearing capacity of the ice wedge, <code>P = C_f (θ/π)² σ_f h²</code>, a cusp of radius <code>R = C_l ℓ (1 + C_v v_n)</code> snaps off. A floe splits when the in-plane force passes <code>h K_Ic √L</code>.</p>
@@ -176,8 +188,8 @@
     <div class="legend"><span id="legForce" hidden><span><i></i>ice force on the hull</span><span><i class="mean"></i>10 s mean</span><span id="lqLegend"><i class="ref"></i>Lindqvist</span></span><span id="legSpeed"><span><i></i>speed through the water</span><span><i class="ref"></i>share of ice at the ship</span></span></div>
   </section>
 
-  <p id="hint">Scroll to zoom from the whole Gulf down to the hull · click water to send the ship there · drag to move</p>
-  <div id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
+  <p id="hint">Zoom in on the ship to see it break the ice · click water to send it there · drag to move</p>
+  <div id="zoom"><button id="zHull2" class="word" aria-label="Zoom to the hull">Hull</button><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zVoyage2" class="word" aria-label="Show the whole voyage">All</button></div>
 </div>
 
 <script src="icebreaker-core.js"></script>
@@ -194,6 +206,7 @@
   const cv = $('view'), ctx = cv.getContext('2d'), tr = $('trace'), tctx = tr.getContext('2d');
   const TS = 256, vnoise = IceSim.vnoise, hash2 = IceSim.hash2, KY = StlNav.KY, RAD = Math.PI / 180, TAU = 2 * Math.PI, CH = IceSim.CH;
   const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+  const NEAR = 10;                             // metres per pixel under which the ice around the ship is broken for real
   const LAND = 'rgb(86,84,72)', SHIP_COL = { icebreaker: '#e8a33d', ferry: '#1b6f8c', ropax: '#1b6f8c' };
   const LABELS = { escoumins: 'Les Escoumins', baie_comeau: 'Baie-Comeau', sept_iles: 'Sept-Îles', matane: 'Matane', cabot_strait: 'Cabot Strait', cap_aux_meules: 'Îles de la Madeleine', port_aux_basques: 'Port aux Basques' };
   let W = 1, Hh = 1, dpr = 1, showLoads = false, showCracks = true, physMs = 0, firstFrame = true, frameNo = 0;
@@ -204,7 +217,7 @@
   let col = { sea: '#113a4a', ink: '#0f2530', muted: '#4a626e', line: 'rgba(0,0,0,.2)', accent: '#bd3620', ref: '#1b6f8c' };
   // The voyage on the map, and the camera: view.x, view.y in kilometres east and south of the grid's north-west corner, view.s in pixels per kilometre.
   const M = { world: null, error: '', s: null, nav: null, voyage: 0, seed: 1, thr: 1, trail: [], hist: [], histAcc: 0, info: null, status: '', done: false, flash: '', flashUntil: 0,
-    img: null, fine: null, pos: null, prev: null, own0: null, kx: 1, lonW: 0, latN: 0, acc: 0, rate: 1, slow: 1, mode: 'model', byHand: false, stuck: 0,
+    img: null, fine: null, coast: null, zoomGoal: 0, pos: null, prev: null, own0: null, kx: 1, lonW: 0, latN: 0, acc: 0, rate: 1, slow: 1, mode: 'model', byHand: false, stuck: 0,
     view: { x: 0, y: 0, s: 1 }, follow: true };
   let sim = null;                              // the ice-breaking simulator around the ship, while the view is close
   const L0 = { x: 0, y: 0, th0: 0, patches: 0, checked: 0, fade: 0 };   // where the simulator's ship was last seen in its own metres; map heading of its x axis
@@ -373,7 +386,8 @@
         const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(im, 0, 0);
         const px = x.getImageData(0, 0, pic.nx, pic.ny).data, n = pic.nx * pic.ny, conc = new Float32Array(n), land = new Uint8Array(n);
         for (let k = 0; k < n; k++) { const v = px[4 * k]; if (v === 255) land[k] = 1; else conc[k] = v / pic.scale; }
-        M.fine = { canvas: paintIce(conc, land, pic.nx, pic.ny, 2, true), x0: toX(pic.lon0 - pic.dlon / 2), y0: toY(pic.lat0 + pic.dlat / 2), w: pic.nx * pic.dlon * M.kx, h: pic.ny * pic.dlat * KY };
+        M.fine = { canvas: paintIce(conc, land, pic.nx, pic.ny, 2, true, !!pic.coast), x0: toX(pic.lon0 - pic.dlon / 2), y0: toY(pic.lat0 + pic.dlat / 2), w: pic.nx * pic.dlon * M.kx, h: pic.ny * pic.dlat * KY };
+        if (pic.coast) M.coast = coastPath(pic);
       };
       im.src = pic.file;
     }
@@ -386,7 +400,7 @@
 
   // Ice and land as a picture. Every cell is spread over k x k pixels with bilinear weights, so that coasts and ice edges come out as
   // smooth lines and not as squares. conc and land hold ny rows of nx cells; `north` tells whether the first row is the northern one.
-  function paintIce(conc, land, nx, ny, k, north) {
+  function paintIce(conc, land, nx, ny, k, north, iceOnly) {
     const c2 = Float32Array.from(conc), known = new Uint8Array(nx * ny); for (let q = 0; q < nx * ny; q++) known[q] = land[q] ? 0 : 1;
     for (let pass = 0; pass < 3; pass++) {   // carry the ice three cells under the land, or the fading coast would show a dark rim of open water
       const was = Uint8Array.from(known);
@@ -402,7 +416,7 @@
       for (let j = 0; j < ny; j++) for (let i = 0, q = j * nx; i < nx; i++, q++) out[q] = 0.25 * t[j ? q - nx : q] + 0.5 * t[q] + 0.25 * t[j < ny - 1 ? q + nx : q];
       return out;
     };
-    const lf = blur(land), cf = blur(c2);
+    const lf = blur(land), cf = iceOnly ? blur(blur(c2)) : blur(c2);                              // ice edges on the chart are drawn by hand: soften them more than the coast
     const W = nx * k, H = ny * k, cvs = document.createElement('canvas'); cvs.width = W; cvs.height = H;
     const g = cvs.getContext('2d'), img = g.createImageData(W, H), px = img.data, i0s = new Int32Array(W), fxs = new Float32Array(W);
     for (let X = 0; X < W; X++) { const sx = clamp((X + 0.5) / k - 0.5, 0, nx - 1); i0s[X] = Math.min(sx | 0, nx - 2); fxs[X] = sx - i0s[X]; }
@@ -411,7 +425,7 @@
       for (let X = 0, o = Y * W * 4; X < W; X++, o += 4) {
         const a0 = r0 + i0s[X], a1 = r1 + i0s[X], fx = fxs[X], w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
         const L = lf[a0] * w00 + lf[a0 + 1] * w10 + lf[a1] * w01 + lf[a1 + 1] * w11, C = cf[a0] * w00 + cf[a0 + 1] * w10 + cf[a1] * w01 + cf[a1 + 1] * w11;
-        let l = (L - 0.42) / 0.16; l = l <= 0 ? 0 : l >= 1 ? 1 : l * l * (3 - 2 * l);              // land fades in across the coast
+        let l = iceOnly ? 0 : (L - 0.42) / 0.16; l = l <= 0 ? 0 : l >= 1 ? 1 : l * l * (3 - 2 * l);   // land fades in across the coast
         const a = 0.96 * (C > 1 ? 1 : C), A = l + (1 - l) * a; if (A <= 0.002) continue;
         const rim = 1 - 0.22 * (1 - Math.abs(2 * l - 1));                                         // a slightly darker line along the coast
         px[o] = (l * 86 * rim + (1 - l) * a * 236) / A; px[o + 1] = (l * 84 * rim + (1 - l) * a * 243) / A; px[o + 2] = (l * 72 * rim + (1 - l) * a * 246) / A; px[o + 3] = 255 * A;
@@ -421,6 +435,20 @@
   }
 
 
+  // The land as a shape. The coast comes as closed lines in cells of the chart's picture; here they become one path in the map's kilometres,
+  // rounded at every corner, which the canvas fills with a sharp edge at any zoom. (A picture of 1 km cells shows as steps on a screen.)
+  function coastPath(pic) {
+    const q = pic.coast.q, sx = pic.dlon * M.kx / q, sy = pic.dlat * KY / q, x0 = toX(pic.lon0), y0 = toY(pic.lat0), P = new Path2D();
+    for (const r of pic.coast.rings) {
+      const n = r.length / 2; if (n < 3) continue;
+      const X = i => x0 + r[2 * ((i + n) % n)] * sx, Y = i => y0 + r[2 * ((i + n) % n) + 1] * sy;
+      P.moveTo((X(-1) + X(0)) / 2, (Y(-1) + Y(0)) / 2);                                          // from the middle of one side to the middle of the next, bending at the corner
+      for (let i = 0; i < n; i++) P.quadraticCurveTo(X(i), Y(i), (X(i) + X(i + 1)) / 2, (Y(i) + Y(i + 1)) / 2);
+      P.closePath();
+    }
+    return P;
+  }
+
   function snapshot() {   // where every ship of the traffic is, now and one step ago, so that they can be drawn in between
     const ts = M.s.traffic, n = ts.n, mk = () => ({ lon: new Float64Array(n), lat: new Float64Array(n), hd: new Float64Array(n), on: new Uint8Array(n) });
     const p = M.pos || (M.pos = mk()), q = M.prev || (M.prev = mk());
@@ -428,14 +456,18 @@
     for (let i = 0; i < n; i++) { const r = StlNav.place(M.world, ts.route[i], ts.s[i], ts.off[i]); p.lon[i] = r[0]; p.lat[i] = r[1]; p.hd[i] = r[2]; p.on[i] = ts.active[i]; }
   }
 
+  function voyageZoom() {   // pixels per kilometre at which the rest of the voyage fits around the ship
+    const s = M.s, p = M.nav.path, x0 = toX(s.lon), y0 = toY(s.lat); let far = 1;
+    for (let q = Math.max(0, M.nav.k - 1); q < p.length; q++) far = Math.max(far, Math.abs(toX(p[q].lon) - x0) / Math.max(40, W / 2 - (W > 720 ? 330 : 30)), Math.abs(toY(p[q].lat) - y0) / Math.max(40, Hh / 2 - (W > 720 ? 60 : 190)));
+    return clamp(0.9 / far, 0.25, 30);
+  }
   function startVoyage() {
     const w = M.world, nav = M.nav = StlNav.voyage(w, M.voyage), p = nav.path, e = p[p.length - 1];
     const th = Math.atan2((p[1].lat - p[0].lat) * KY, (p[1].lon - p[0].lon) * KY * Math.cos(p[0].lat * RAD));
     sim = null; M.mode = 'model'; M.trail = []; M.hist = []; M.histAcc = 0; M.done = false; M.status = ''; M.acc = 0; M.info = null; M.pos = M.prev = null; M.byHand = false; M.stuck = 0;
     M.s = StlNav.reset(w, { lon: p[0].lon, lat: p[0].lat, th, goalLon: e.lon, goalLat: e.lat, cls: 0, seed: M.seed });
     M.own0 = { lon: M.s.lon, lat: M.s.lat, th: M.s.th }; snapshot(); snapshot();
-    let far = 1; for (const q of p) far = Math.max(far, Math.abs(toX(q.lon) - toX(p[0].lon)) / Math.max(40, W / 2 - (W > 720 ? 330 : 30)), Math.abs(toY(q.lat) - toY(p[0].lat)) / Math.max(40, Hh / 2 - (W > 720 ? 60 : 190)));
-    M.view.s = clamp(0.9 / far, 0.25, 30); M.view.x = toX(M.s.lon); M.view.y = toY(M.s.lat); setFollow(true); readouts();
+    M.zoomGoal = 0; M.view.s = voyageZoom(); M.view.x = toX(M.s.lon); M.view.y = toY(M.s.lat); setFollow(true); readouts();
   }
 
   // ---------------------------------------------------------------- the two engines
@@ -514,7 +546,10 @@
     if (keys.s || keys.arrowdown) M.thr = clamp(M.thr - 0.7 * dtReal, -1, 1);
     const mpp = 1000 / M.view.s;                 // metres per pixel
     // Close to the ship the ice is broken for real, at about the speed of a clock. Far out the fitted model sails the ship, fast.
-    if (M.mode === 'model' && mpp < 6 && !M.done) enterPhysics(); else if (M.mode === 'physics' && (mpp > 8 || M.done)) leavePhysics();
+    if (M.zoomGoal) {   // a zoom asked for with a button: glide there
+      const v = M.view, g = Math.log(M.zoomGoal), c = Math.log(v.s) + (g - Math.log(v.s)) * (1 - Math.exp(-dtReal * 3.5)); v.s = Math.exp(c); if (Math.abs(g - c) < 0.01) { v.s = M.zoomGoal; M.zoomGoal = 0; }
+    }
+    if (M.mode === 'model' && mpp < NEAR && !M.done) enterPhysics(); else if (M.mode === 'physics' && (mpp > NEAR * 1.3 || M.done)) leavePhysics();
     M.rate = M.mode === 'physics' ? clamp(0.7 * mpp, 1, 4) * M.slow : clamp(2.2 * mpp, 30, 7200);
     if (paused || M.done) return;
     if (M.mode === 'physics') stepPhysics(dtReal); else stepModel(dtReal);
@@ -547,6 +582,13 @@
     const ix = X(-0.5 * g.dlon * M.kx), iy = Y(-0.5 * g.dlat * KY), iw = g.nx * g.dlon * M.kx * v.s, ih = g.ny * g.dlat * KY * v.s;
     ctx.fillStyle = col.sea; ctx.fillRect(ix, iy, iw, ih); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(M.img, ix, iy, iw, ih);
     if (M.fine) { const f = M.fine; ctx.fillRect(X(f.x0), Y(f.y0), f.w * v.s, f.h * v.s); ctx.drawImage(f.canvas, X(f.x0), Y(f.y0), f.w * v.s, f.h * v.s); }
+    if (M.coast) {                                                                                // the land, as a shape with a sharp edge
+      ctx.setTransform(v.s * dpr, 0, 0, v.s * dpr, (W / 2 - v.x * v.s) * dpr, (Hh / 2 - v.y * v.s) * dpr);
+      ctx.fillStyle = LAND; ctx.fill(M.coast, 'evenodd');
+      const f = M.fine, e = 1.5; ctx.save(); ctx.beginPath(); ctx.rect(f.x0 + e, f.y0 + e, f.w - 2 * e, f.h - 2 * e); ctx.clip();   // a darker line along the coast, but not along the edge of the picture
+      ctx.lineJoin = 'round'; ctx.lineWidth = 1.3 / v.s; ctx.strokeStyle = 'rgba(52,50,42,0.9)'; ctx.stroke(M.coast); ctx.restore();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
     // the routes of the traffic
     ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(20,60,80,' + (0.12 + 0.23 * far).toFixed(2) + ')'; ctx.beginPath();
     for (let r = 0; r < w.R; r++) {
@@ -600,9 +642,9 @@
       if (!p.on[i]) continue;
       const jump = !q.on[i] || Math.abs(p.lon[i] - q.lon[i]) + Math.abs(p.lat[i] - q.lat[i]) > 0.05, b = jump ? 1 : a, cl = w.classes[ts.cls[i]];   // a slot that has just been given a new ship is not drawn in between
       const x = X(toX(q.lon[i] + (p.lon[i] - q.lon[i]) * b)), y = Y(toY(q.lat[i] + (p.lat[i] - q.lat[i]) * b)); if (x < -200 || y < -200 || x > W + 200 || y > Hh + 200) continue;
-      if (cl.L * k > 12) hullGlyph(x, y, p.hd[i], cl.L, cl.B, k, SHIP_COL[cl.name] || '#0f2530'); else glyph(x, y, p.hd[i], len, SHIP_COL[cl.name] || '#0f2530');
+      if (cl.L * k > 9) hullGlyph(x, y, p.hd[i], cl.L, cl.B, k, SHIP_COL[cl.name] || '#0f2530'); else glyph(x, y, p.hd[i], len, SHIP_COL[cl.name] || '#0f2530');
     }
-    if (!sim) { const cl = w.classes[s.cls]; if (cl.L * k > 12) hullGlyph(sx, sy, hd, cl.L, cl.B, k, '#bd3620'); else glyph(sx, sy, hd, len * 1.5, '#bd3620'); }
+    if (!sim) { const cl = w.classes[s.cls]; if (cl.L * k > 9) hullGlyph(sx, sy, hd, cl.L, cl.B, k, '#bd3620'); else glyph(sx, sy, hd, len * 1.5, '#bd3620'); }
     if (far > 0) {                                                                                // place names, written towards the middle of the window
       ctx.lineJoin = 'round'; ctx.globalAlpha = far;
       for (const name in LABELS) {
@@ -676,6 +718,12 @@
     $('lqLegend').hidden = !levelHere();
     const msg = M.flash && performance.now() < M.flashUntil ? M.flash : M.status; $('status').textContent = msg; $('status').hidden = !msg;
     const t = Math.round(M.thr * 100); if (+$('thr').value !== t) { $('thr').value = t; $('thrOut').textContent = t + ' %'; }
+    const mpp = 1000 / M.view.s, z = $('zs'); if (document.activeElement !== z) z.value = Math.round(1000 * Math.log(Z_FAR / mpp) / Math.log(Z_FAR / Z_NEAR));
+    $('zsOut').textContent = mpp >= 1000 ? (mpp / 1000).toFixed(1) + ' km per pixel' : mpp >= 10 ? Math.round(mpp) + ' m per pixel' : mpp.toFixed(1) + ' m per pixel';
+    $('zNote').textContent = close ? 'The ice around the ship is being broken for real. Zoom out to speed up the clock.'
+      : 'The ice breaks for real below ' + NEAR + ' m per pixel: zoom in ' + (mpp / NEAR >= 10 ? Math.round(mpp / NEAR) : (mpp / NEAR).toFixed(1)) + ' times more, or press the button.';
+    $('cue').textContent = close ? 'The ice around the ship is being broken for real. Zoom out (All) to speed up the clock.' : 'Zoom in on the ship (Hull) to see it break the ice: ' + (mpp / NEAR >= 10 ? Math.round(mpp / NEAR) : (mpp / NEAR).toFixed(1)) + ' times closer than now.';
+    $('hint').textContent = close ? 'A/D steer · W/S throttle · zoom out to speed up the clock' : 'Zoom in on the ship to see it break the ice · click water to send it there · drag to move';
   }
 
   // ---------------------------------------------------------------- main loop
@@ -695,9 +743,14 @@
   }
 
   // ---------------------------------------------------------------- controls
+  const Z_FAR = 4000, Z_NEAR = 0.12;           // the zoom slider runs from 4 km per pixel to 12 cm per pixel, evenly in ratio
+  $('zs').addEventListener('input', e => { M.zoomGoal = 0; M.view.s = 1000 / (Z_FAR * Math.pow(Z_NEAR / Z_FAR, +e.target.value / 1000)); });
+  $('zs').addEventListener('change', e => e.target.blur());
+  for (const id of ['zHull', 'zHull2']) $(id).addEventListener('click', () => { setFollow(true); M.zoomGoal = 1000 / 0.5; });
+  for (const id of ['zVoyage', 'zVoyage2']) $(id).addEventListener('click', () => { if (M.world) { setFollow(true); M.zoomGoal = voyageZoom(); } });
   function setFollow(on) { M.follow = on; $('follow').setAttribute('aria-pressed', on ? 'true' : 'false'); }
   function zoomBy(f, px, py) {   // about the ship when the view follows it, else about a point of the window (default: its middle)
-    const v = M.view, s1 = clamp(v.s * f, 0.25, 9000); if (!M.follow && px !== undefined) { v.x += px * (1 / v.s - 1 / s1); v.y += py * (1 / v.s - 1 / s1); } v.s = s1;
+    const v = M.view, s1 = clamp(v.s * f, 0.25, 9000); M.zoomGoal = 0; if (!M.follow && px !== undefined) { v.x += px * (1 / v.s - 1 / s1); v.y += py * (1 / v.s - 1 / s1); } v.s = s1;
   }
   $('voy').addEventListener('change', e => { M.voyage = +e.target.value; e.target.blur(); if (M.world) startVoyage(); });
   $('h').addEventListener('input', e => { const v = +e.target.value; $('hOut').textContent = v.toFixed(2) + ' m'; if (M.world) M.world.thick = v; if (sim) IceSim.setThickness(sim, v); });
@@ -753,7 +806,7 @@
     if (water) { M.nav.manual = { lon, lat, reach: clamp(0.25 * km, 0.05, 2) }; M.byHand = false; } else { M.flash = 'Land lies between the ship and that place.'; M.flashUntil = performance.now() + 3500; }
     readouts();
   });
-  cv.addEventListener('wheel', e => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left - W / 2, e.clientY - r.top - Hh / 2); }, { passive: false });
+  cv.addEventListener('wheel', e => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoomBy(Math.exp(-e.deltaY * 0.003), e.clientX - r.left - W / 2, e.clientY - r.top - Hh / 2); }, { passive: false });
 
   function boot() {
     readTheme(); resize(); makeWater(); layout(); setPaused(paused); setTrace();
